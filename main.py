@@ -8,7 +8,7 @@ from aiohttp import web
 from aiogram import BaseMiddleware, Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -54,12 +54,18 @@ T = {
     "c_channel": ("📢 Канал", "📢 Канал", "📢 Channel"),
     "c_other": ("📦 Другое", "📦 Інше", "📦 Other"),
     "q_cat": ("Выберите категорию:", "Оберіть категорію:", "Choose a category:"),
-    "q_title": ("Название (до 60 символов):", "Назва (до 60 символів):", "Title (up to 60 chars):"),
-    "q_desc": ("Описание (до 300 символов):", "Опис (до 300 символів):", "Description (up to 300 chars):"),
-    "q_link": ("Ваша реферальная ссылка (https://...):", "Ваше реферальне посилання (https://...):",
-               "Your referral link (https://...):"),
-    "bad": ("Нужна ссылка, начинающаяся с http:// или https://", "Потрібне посилання, що починається з http:// або https://",
-            "A link starting with http:// or https:// is required"),
+    "q_title": ("Шаг 2 из 4. Название сервиса, например @MyBot (до 60 символов):",
+                "Крок 2 з 4. Назва сервісу, наприклад @MyBot (до 60 символів):",
+                "Step 2 of 4. Service name, e.g. @MyBot (up to 60 chars):"),
+    "q_desc": ("Шаг 3 из 4. Описание (необязательно): что нужно сделать, например «подпишись на спонсоров, потом запусти фрикейс». До 300 символов.",
+               "Крок 3 з 4. Опис (необов'язково): що треба зробити, наприклад «підпишись на спонсорів, потім запусти фрікейс». До 300 символів.",
+               "Step 3 of 4. Description (optional): what to do, e.g. “subscribe to the sponsors, then spin the free case”. Up to 300 chars."),
+    "q_link": ("Шаг 4 из 4. Реферальная ссылка. Подойдут: t.me/MyBot, https://..., @MyBot, tg://resolve?domain=MyBot",
+               "Крок 4 з 4. Реферальне посилання. Підійдуть: t.me/MyBot, https://..., @MyBot, tg://resolve?domain=MyBot",
+               "Step 4 of 4. Referral link. Accepted: t.me/MyBot, https://..., @MyBot, tg://resolve?domain=MyBot"),
+    "bad": ("Не распознал ссылку. Примеры: t.me/MyBot, https://site.com/?ref=1, @MyBot, tg://resolve?domain=MyBot",
+            "Не розпізнав посилання. Приклади: t.me/MyBot, https://site.com/?ref=1, @MyBot, tg://resolve?domain=MyBot",
+            "Could not read the link. Examples: t.me/MyBot, https://site.com/?ref=1, @MyBot, tg://resolve?domain=MyBot"),
     "saved": ("✅ Анкета опубликована!", "✅ Анкету опубліковано!", "✅ Listing published!"),
     "empty": ("Пока ничего нет.", "Поки нічого немає.", "Nothing here yet."),
     "write": ("✉️ Написать", "✉️ Написати", "✉️ Message"),
@@ -77,6 +83,10 @@ T = {
             "To see more listings, subscribe to the channel: {ch}"),
     "b_sub": ("📢 Подписаться", "📢 Підписатися", "📢 Subscribe"),
     "b_admin": ("🛠 Адмін-панель", "🛠 Адмін-панель", "🛠 Адмін-панель"),
+    "b_cancel": ("❌ Отменить", "❌ Відмінити", "❌ Cancel"),
+    "b_skip": ("⏭ Пропустить", "⏭ Пропустити", "⏭ Skip"),
+    "need_text": ("Нужен текст. Напишите сообщением или нажмите «Отменить».", "Потрібен текст. Напишіть повідомленням або натисніть «Відмінити».",
+                  "Text is needed. Write a message or tap “Cancel”."),
     "b_rating": ("🏆 Рейтинг", "🏆 Рейтинг", "🏆 Rating"),
     "b_rules": ("⚖️ Правила", "⚖️ Правила", "⚖️ Rules"),
     "b_back": ("◀️ Назад", "◀️ Назад", "◀️ Back"),
@@ -635,36 +645,52 @@ async def new(c: CallbackQuery, lang, state: FSMContext):
 async def new_cat(c: CallbackQuery, lang, state: FSMContext):
     await state.update_data(cat=c.data[3:])
     await state.set_state(New.title)
-    await c.message.answer(t(lang, "q_title"))
+    await c.message.answer(t(lang, "q_title"), reply_markup=cancel_kb(lang))
     await c.answer()
 
 
 @r.message(New.title, F.text)
-async def new_title(m, lang, state: FSMContext):
-    await state.update_data(title=m.text[:60])
+async def new_title(m: Message, lang, state: FSMContext):
+    title = m.text.strip()[:60]
+    if not title:
+        return await m.answer(t(lang, "q_title"), reply_markup=cancel_kb(lang))
+    await state.update_data(title=title)
     await state.set_state(New.desc)
-    await m.answer(t(lang, "q_desc"))
+    await m.answer(t(lang, "q_desc"), reply_markup=skip_cancel_kb(lang))
 
 
 @r.message(New.desc, F.text)
-async def new_desc(m, lang, state: FSMContext):
-    await state.update_data(desc=m.text[:300])
+async def new_desc(m: Message, lang, state: FSMContext):
+    await state.update_data(desc=m.text.strip()[:300])
     await state.set_state(New.link)
-    await m.answer(t(lang, "q_link"))
+    await m.answer(t(lang, "q_link"), reply_markup=cancel_kb(lang))
+
+
+@r.callback_query(F.data == "nskip", StateFilter(New.desc))
+async def new_desc_skip(c: CallbackQuery, lang, state: FSMContext):
+    await state.update_data(desc="")
+    await state.set_state(New.link)
+    await c.message.answer(t(lang, "q_link"), reply_markup=cancel_kb(lang))
+    await c.answer()
 
 
 @r.message(New.link, F.text)
-async def new_link(m, lang, state: FSMContext):
-    link = m.text.strip()
-    if not re.fullmatch(r"https?://\S{3,290}", link):
-        return await m.answer(t(lang, "bad"))
+async def new_link(m: Message, lang, state: FSMContext):
+    link = normalize_link(m.text)
+    if not link:
+        return await m.answer(t(lang, "bad"), reply_markup=cancel_kb(lang))
     d = await state.get_data()
     await db.execute("insert into listings(owner,category,title,descr,link) values($1,$2,$3,$4,$5)",
-                     m.from_user.id, d["cat"], d["title"], d["desc"], link)
+                     m.from_user.id, d["cat"], d["title"], d.get("desc", ""), link)
     await log_event(m.from_user.id, "create")
     await refresh_rules(m.from_user.id, m.bot)
     await state.clear()
     await send_menu(m, lang, t(lang, "saved"), "saved")
+
+
+@r.message(StateFilter(New.title, New.desc, New.link))
+async def new_not_text(m: Message, lang):
+    await m.answer(t(lang, "need_text"), reply_markup=cancel_kb(lang))
 
 
 # --- catalog ---
@@ -694,7 +720,7 @@ async def show_page(c, lang, cat_, p):
         f"select l.*, u.username from listings l join users u on u.id=l.owner where {cond} "
         f"order by l.updated desc, l.id offset {p} limit 1", *args)
     await log_event(c.from_user.id, "view")
-    text = f"{t(lang, 'c_' + x['category'])}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}"
+    text = f"{t(lang, 'c_' + x['category'])}\n<b>{esc(x['title'])}</b>" + (f"\n{esc(x['descr'])}" if x["descr"] else "")
     rows = []
     if x["owner"] == c.from_user.id:
         text += f"\n\n<i>{t(lang, 'yours')}</i>"
@@ -793,6 +819,42 @@ async def delete(c: CallbackQuery, lang):
     await c.answer(t(lang, "done"))
 
 
+# --- shared inputs: cancel and skip buttons ---
+def cancel_kb(lang):
+    return KB(inline_keyboard=[[B(text=t(lang, "b_cancel"), callback_data="cancel")]])
+
+
+def skip_cancel_kb(lang):
+    return KB(inline_keyboard=[[B(text=t(lang, "b_skip"), callback_data="nskip")],
+                               [B(text=t(lang, "b_cancel"), callback_data="cancel")]])
+
+
+@r.callback_query(F.data == "cancel")
+async def cancel_cb(c: CallbackQuery, lang, state: FSMContext):
+    await state.clear()
+    await send_menu(c, lang)
+    await c.answer()
+
+
+def normalize_link(raw):
+    """Accepts t.me/..., telegram.me/..., https://..., http://..., bare domains, @username and tg:// deep links."""
+    s = (raw or "").strip()
+    if not s or len(s) > 290 or re.search(r"\s", s):
+        return None
+    if re.fullmatch(r"@[A-Za-z0-9_]{4,32}", s):
+        return f"https://t.me/{s[1:]}"
+    if re.fullmatch(r"tg://\S{3,250}", s, re.IGNORECASE):
+        return s
+    if not re.match(r"https?://", s, re.IGNORECASE):
+        if not re.match(r"[\w.-]+\.[a-z]{2,}(/\S*)?$", s, re.IGNORECASE):
+            return None
+        s = "https://" + s
+    p = urlparse(s)
+    if p.scheme not in ("http", "https") or "." not in p.netloc:
+        return None
+    return urlunparse(p._replace(scheme=p.scheme.lower(), netloc=p.netloc.lower()))
+
+
 # --- rules, rating and referral claims ---
 class Claim(StatesGroup):
     proof = State()
@@ -850,7 +912,7 @@ async def claim_start(c: CallbackQuery, lang, state: FSMContext):
         return await c.answer(reason, show_alert=True)
     await state.set_state(Claim.proof)
     await state.update_data(lid=lid)
-    await send_screen(c.bot, c.message.chat.id, "proof", t(lang, "claim_ask"), home_kb())
+    await send_screen(c.bot, c.message.chat.id, "proof", t(lang, "claim_ask"), cancel_kb(lang))
     await c.answer()
 
 
@@ -873,7 +935,7 @@ async def claim_proof(m: Message, lang, state: FSMContext):
 
 @r.message(Claim.proof)
 async def claim_proof_wrong(m: Message, lang):
-    await m.answer(t(lang, "claim_need_photo"))
+    await m.answer(t(lang, "claim_need_photo"), reply_markup=cancel_kb(lang))
 
 
 @r.callback_query(F.data.regexp(r"^c[fd]:\d+$"))
@@ -906,7 +968,7 @@ class Support(StatesGroup):
 @r.callback_query(F.data == "sup")
 async def support_start(c: CallbackQuery, lang, state: FSMContext):
     await state.set_state(Support.write)
-    await send_screen(c.bot, c.message.chat.id, "support", t(lang, "sup_ask"), home_kb())
+    await send_screen(c.bot, c.message.chat.id, "support", t(lang, "sup_ask"), cancel_kb(lang))
     await c.answer()
 
 
@@ -1173,7 +1235,8 @@ async def setting_ask(c: CallbackQuery, state: FSMContext):
     k = c.data[3:]
     await state.set_state(Adm.val)
     await state.update_data(key=k)
-    await c.message.answer(f"Надішліть нове значення для «{SET_NAMES[k]}» (або «-», щоб очистити):")
+    await c.message.answer(f"Надішліть нове значення для «{SET_NAMES[k]}» (або «-», щоб очистити):",
+                           reply_markup=cancel_kb("uk"))
     await c.answer()
 
 
@@ -1193,7 +1256,7 @@ async def setting_save(m, lang, state: FSMContext):
 @ar.callback_query(F.data == "adm:bc")
 async def bc_ask(c: CallbackQuery, state: FSMContext):
     await state.set_state(Adm.bc)
-    await c.message.answer("Надішліть текст розсилки (HTML дозволено). /cancel — скасувати.")
+    await c.message.answer("Надішліть текст розсилки (HTML дозволено).", reply_markup=cancel_kb("uk"))
     await c.answer()
 
 
@@ -1285,7 +1348,7 @@ async def sup_queue(c: CallbackQuery):
 async def sup_reply_ask(c: CallbackQuery, state: FSMContext):
     await state.set_state(Adm.reply)
     await state.update_data(tid=int(c.data[3:]))
-    await c.message.answer("Напишіть відповідь одним повідомленням (текст). /cancel — скасувати.")
+    await c.message.answer("Напишіть відповідь одним повідомленням (текст).", reply_markup=cancel_kb("uk"))
     await c.answer()
 
 
