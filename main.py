@@ -205,9 +205,9 @@ def t(lang, key, **kw):
 DEFAULTS = {"ttl_days": "30", "report_threshold": "3", "sub_required": "0", "sub_channel": "",
             "welcome_ru": "", "welcome_uk": "", "welcome_en": "",
             "claim_days": "3", "open_claims_max": "3", "pair_cooldown_days": "30",
-            "debt_limit": "2", "penalty_per_strike": "3", "disputes_per_10": "5", "catalog_link": "0"}
+            "debt_limit": "2", "penalty_per_strike": "3", "disputes_per_10": "5"}
 NUM_KEYS = ("ttl_days", "report_threshold", "claim_days", "open_claims_max",
-            "pair_cooldown_days", "debt_limit", "penalty_per_strike", "disputes_per_10", "catalog_link")
+            "pair_cooldown_days", "debt_limit", "penalty_per_strike", "disputes_per_10")
 
 
 async def setting(k):
@@ -731,8 +731,7 @@ async def show_page(c, lang, cat_, p):
         else:
             url = f"tg://user?id={x['owner']}"
             text += f"\n\n<i>{t(lang, 'hint')}</i>"
-        if await setting("catalog_link") == "1":
-            rows.append([B(text=t(lang, "open_link"), url=x["link"])])
+        rows.append([B(text=t(lang, "open_link"), url=x["link"])])
         rows += [[B(text=t(lang, "claim"), callback_data=f"cl:{x['id']}")],
                  [B(text=t(lang, "skip"), callback_data=f"sk:{x['id']}:{cat_}:{p}")],
                  [B(text=t(lang, "write"), url=url)],
@@ -801,7 +800,8 @@ async def my(c: CallbackQuery, lang):
         await c.message.answer(
             f"{t(lang, 'c_' + x['category'])}{st}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}\n🔗 <a href='{esc(x['link'])}'>{esc(x['link'])}</a>",
             reply_markup=KB(inline_keyboard=[[B(text=t(lang, "renew"), callback_data=f"lr:{x['id']}"),
-                                              B(text=t(lang, "delete"), callback_data=f"ld:{x['id']}")]]))
+                                              B(text=t(lang, "delete"), callback_data=f"ld:{x['id']}")],
+                                              [B(text=t(lang, "open_link"), url=x["link"])]]))
     await c.answer()
 
 
@@ -1004,7 +1004,6 @@ SET_NAMES = {"ttl_days": "Термін життя анкети (дні)", "repor
              "debt_limit": "Поріг боргу (анкета ховається)",
              "penalty_per_strike": "Штраф за фейк (відпрацювань і рейтингу)",
              "disputes_per_10": "Спорів на кожні 10 заявок до вас (5 = половина)",
-             "catalog_link": "Кнопка з посиланням у каталозі (1 - так, 0 - ні)",
              "welcome_ru": "Привітання RU", "welcome_uk": "Привітання UK", "welcome_en": "Привітання EN"}
 
 
