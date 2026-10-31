@@ -69,8 +69,10 @@ T = {
     "hidden": ("(скрыта)", "(прихована)", "(hidden)"),
     "expiring": ("Анкета «{t}» скоро исчезнет. Продлить?", "Анкета «{t}» скоро зникне. Продовжити?",
                  "Listing “{t}” will expire soon. Renew?"),
-    "sub": ("Для использования бота подпишитесь на канал {ch}", "Щоб користуватись ботом, підпишіться на канал {ch}",
-            "Subscribe to the channel to use the bot: {ch}"),
+    "sub": ("Чтобы смотреть следующие анкеты, подпишитесь на канал {ch}",
+            "Щоб переглядати наступні анкети, підпішіться на канал {ch}",
+            "To see more listings, subscribe to the channel: {ch}"),
+    "b_sub": ("📢 Подписаться", "📢 Підписатися", "📢 Subscribe"),
     "check": ("✅ Я подписался", "✅ Я підписався", "✅ I subscribed"),
     "hint": ("Если кнопка не открывается — автор скрыл профиль.", "Якщо кнопка не відкривається — автор сховав профіль.",
              "If the button doesn't open, the author hid their profile."),
@@ -93,6 +95,22 @@ async def setting(k):
 
 async def set_setting(k, v):
     await db.execute("insert into settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value", k, v)
+
+
+async def sub_gate(bot, uid):
+    """Returns the channel the user still has to join, or None if no subscription is required."""
+    if uid in ADMIN_IDS or await setting("sub_required") != "1":
+        return None
+    ch = await setting("sub_channel")
+    if not ch:
+        return None
+    try:
+        cid = int(ch) if ch.lstrip("-").isdigit() else ch
+        m = await bot.get_chat_member(cid, uid)
+        return ch if m.status in ("left", "kicked") else None
+    except Exception:
+        logging.exception("subscription check failed (is the bot an admin of the channel?)")
+        return None  # fail open, so a misconfigured channel does not lock everyone out
 
 
 # ---------- DB ----------
@@ -185,21 +203,6 @@ class Mw(BaseMiddleware):
                 await event.answer()
             return
         lang = row["lang"] or "ru"
-        if u.id not in ADMIN_IDS and await setting("sub_required") == "1":
-            ch = await setting("sub_channel")
-            if ch:
-                try:
-                    cid = int(ch) if ch.lstrip("-").isdigit() else ch
-                    m = await data["bot"].get_chat_member(cid, u.id)
-                    ok = m.status not in ("left", "kicked")
-                except Exception:
-                    ok = True
-                if not ok:
-                    await send_screen(data["bot"], msg.chat.id, "sub", t(lang, "sub", ch=esc(ch)),
-                                      KB(inline_keyboard=[[B(text=t(lang, "check"), callback_data="menu")]]))
-                    if is_cb:
-                        await event.answer()
-                    return
         data["lang"] = lang
         return await handler(event, data)
 
@@ -318,6 +321,15 @@ async def cat(c: CallbackQuery, lang):
 @r.callback_query(F.data.startswith("p:"))
 async def page(c: CallbackQuery, lang):
     _, cat_, p = c.data.split(":")
+    if int(p) > 0:
+        ch = await sub_gate(c.bot, c.from_user.id)
+        if ch:
+            rows = []
+            if ch.startswith("@"):
+                rows.append([B(text=t(lang, "b_sub"), url=f"https://t.me/{ch[1:]}")])
+            rows.append([B(text=t(lang, "check"), callback_data=f"p:{cat_}:{p}")])
+            await screen(c, "sub", t(lang, "sub", ch=esc(ch)), KB(inline_keyboard=rows))
+            return await c.answer()
     cond, args = "l.status='active'", []
     if cat_ != "all":
         cond += " and l.category=$1"
@@ -508,8 +520,17 @@ async def settings_menu(c: CallbackQuery):
         v = await setting(k)
         lines.append(f"<b>{name}</b>: {esc(v) or '—'}")
         rows.append([B(text=name, callback_data="as:" + k)])
+    on = await setting("sub_required") == "1"
+    rows.append([B(text="🔒 Вимкнути підписку" if on else "🔒 Увімкнути підписку", callback_data="adm:subtog")])
     await c.message.answer("\n".join(lines), reply_markup=KB(inline_keyboard=rows))
     await c.answer()
+
+
+@ar.callback_query(F.data == "adm:subtog")
+async def sub_toggle(c: CallbackQuery):
+    new = "0" if await setting("sub_required") == "1" else "1"
+    await set_setting("sub_required", new)
+    await settings_menu(c)
 
 
 @ar.callback_query(F.data.startswith("as:"))
