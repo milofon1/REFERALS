@@ -12,7 +12,9 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton as B, InlineKeyboardMarkup as KB
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import (BufferedInputFile, CallbackQuery, FSInputFile, InlineKeyboardButton as B,
+                           InlineKeyboardMarkup as KB, InputMediaPhoto)
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 logging.basicConfig(level=logging.INFO)
@@ -74,6 +76,7 @@ T = {
             "Щоб переглядати наступні анкети, підпішіться на канал {ch}",
             "To see more listings, subscribe to the channel: {ch}"),
     "b_sub": ("📢 Подписаться", "📢 Підписатися", "📢 Subscribe"),
+    "b_admin": ("🛠 Адмін-панель", "🛠 Адмін-панель", "🛠 Адмін-панель"),
     "cat_head": ("🔎 <b>Каталог</b>\n───────────\nЧто ищем сегодня?",
                  "🔎 <b>Каталог</b>\n───────────\nЩо шукаємо сьогодні?",
                  "🔎 <b>Catalog</b>\n───────────\nWhat are we looking for today?"),
@@ -172,10 +175,13 @@ def lang_kb():
                                 B(text="🇬🇧 English", callback_data="sl:en")]])
 
 
-def menu_kb(lang):
+def menu_kb(lang, is_admin=False):
     def b(k, cb):
         return B(text=t(lang, k), callback_data=cb)
-    return KB(inline_keyboard=[[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_lang", "lang")]])
+    rows = [[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_lang", "lang")]]
+    if is_admin:
+        rows.append([b("b_admin", "adm")])
+    return KB(inline_keyboard=rows)
 
 
 # ---------- ILLUSTRATIONS ----------
@@ -208,15 +214,34 @@ async def send_screen(bot, chat_id, name, text, kb=None):
 
 
 async def screen(event, name, text, kb=None):
-    """event: Message or CallbackQuery. For callbacks the old message is removed, so the chat stays clean."""
-    if isinstance(event, CallbackQuery):
-        msg = event.message
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-        return await send_screen(event.bot, msg.chat.id, name, text, kb)
-    return await send_screen(event.bot, event.chat.id, name, text, kb)
+    """Updates the bot's current message in place: one API call, nothing deleted.
+    Switching between photo and text can't be done in place, so those cases send a new message."""
+    if not isinstance(event, CallbackQuery):
+        return await send_screen(event.bot, event.chat.id, name, text, kb)
+    msg = event.message
+    path = find_img(name)
+    fits = len(text) <= 1024
+    try:
+        if path and fits and msg.photo:
+            fid = _file_ids.get(name)
+            res = await msg.edit_media(InputMediaPhoto(media=fid or FSInputFile(path), caption=text), reply_markup=kb)
+            if not fid:
+                _file_ids[name] = res.photo[-1].file_id
+            return res
+        if not path and fits and msg.photo:
+            return await msg.edit_caption(caption=text, reply_markup=kb)
+        if not path and not msg.photo:
+            return await msg.edit_text(text, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            return msg
+        logging.warning("in-place edit failed, sending new message: %s", e)
+    res = await send_screen(event.bot, msg.chat.id, name, text, kb)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+    return res
 
 
 def home_kb():
@@ -266,7 +291,7 @@ r = Router()
 
 
 async def send_menu(target, lang, text=None, img="welcome"):
-    await screen(target, img, text or t(lang, "menu"), menu_kb(lang))
+    await screen(target, img, text or t(lang, "menu"), menu_kb(lang, target.from_user.id in ADMIN_IDS))
 
 
 @r.message(CommandStart())
@@ -404,14 +429,7 @@ async def page(c: CallbackQuery, lang):
     if p < n - 1:
         nav.append(B(text="▶️", callback_data=f"p:{cat_}:{p + 1}"))
     kb = KB(inline_keyboard=rows + [nav, [B(text="🏠", callback_data="menu")]])
-    try:
-        await c.message.edit_text(text, reply_markup=kb)
-    except Exception:
-        try:
-            await c.message.delete()
-        except Exception:
-            pass
-        await c.message.answer(text, reply_markup=kb)
+    await screen(c, "browse", text, kb)
     await c.answer()
 
 
@@ -509,8 +527,13 @@ async def unban(m, lang, command: CommandObject):
     await m.answer("Розбанено.")
 
 
-@ar.callback_query(F.data == "adm:stats")
-async def stats(c: CallbackQuery):
+# ---------- STATS (admin, sent as an image) ----------
+ST_BG, ST_PINK, ST_GREY, ST_WHITE = (17, 17, 17), (255, 42, 138), (150, 150, 150), (245, 245, 245)
+FONT_REG = ROOT_DIR / "fonts" / "DejaVuSans.ttf"
+FONT_BOLD = ROOT_DIR / "fonts" / "DejaVuSans-Bold.ttf"
+
+
+async def stats_data():
     u = await db.fetchrow("""select count(*) total,
       count(*) filter (where banned) banned,
       count(*) filter (where created > now()-interval '1 day') n1,
@@ -520,43 +543,123 @@ async def stats(c: CallbackQuery):
       count(*) filter (where last_seen > now()-interval '7 days') a7
       from users""")
     l = await db.fetchrow("""select count(*) filter (where status='active') active,
-      count(*) filter (where status='hidden') hidden,
-      count(*) filter (where created > now()-interval '1 day') n1,
-      count(*) filter (where created > now()-interval '7 days') n7
+      count(*) filter (where status='hidden') hidden
       from listings""")
-    cats = await cat_counts()
     e = await db.fetchrow("""select
       count(*) filter (where kind='view' and created > now()-interval '1 day') v1,
       count(*) filter (where kind='view' and created > now()-interval '7 days') v7,
       count(*) filter (where kind='view') vall,
-      count(distinct uid) filter (where kind='view' and created > now()-interval '7 days') vu7,
       count(*) filter (where kind='report' and created > now()-interval '7 days') r7
       from events""")
     days = await db.fetch("""select date_trunc('day', created) d, count(*) n from users
       where created > now()-interval '7 days' group by d""")
     today = datetime.now(timezone.utc).date()
     by_day = {x["d"].date(): x["n"] for x in days}
-    vals = [by_day.get(today - timedelta(days=i), 0) for i in range(6, -1, -1)]
+    week = [today - timedelta(days=i) for i in range(6, -1, -1)]
+    return {
+        "total": u["total"], "banned": u["banned"], "n1": u["n1"], "n7": u["n7"], "n30": u["n30"],
+        "a1": u["a1"], "a7": u["a7"], "active": l["active"], "hidden": l["hidden"],
+        "l7": await db.fetchval("select count(*) from listings where created > now()-interval '7 days'"),
+        "cats": await cat_counts(),
+        "v1": e["v1"], "v7": e["v7"], "vall": e["vall"], "r7": e["r7"],
+        "days": [(d.strftime("%d.%m"), by_day.get(d, 0)) for d in week],
+    }
+
+
+def stats_text(s):
+    vals = [v for _, v in s["days"]]
     mx = max(vals) or 1
     spark = "".join("▁▂▃▄▅▆▇█"[round(v / mx * 7)] for v in vals)
-    text = (
+    cats = s["cats"]
+    return (
         "📊 <b>Статистика</b>\n\n"
         "👥 <b>Користувачі</b>\n"
-        f"Всього: {u['total']} · забанено: {u['banned']}\n"
-        f"Нових: за добу +{u['n1']}, за тиждень +{u['n7']}, за місяць +{u['n30']}\n"
-        f"Були в боті: за добу {u['a1']}, за тиждень {u['a7']}\n"
-        f"Нові по днях (7 днів): {spark}\n\n"
+        f"Всього: {s['total']} · забанено: {s['banned']}\n"
+        f"Нових: за добу +{s['n1']}, за тиждень +{s['n7']}, за місяць +{s['n30']}\n"
+        f"Були в боті: за добу {s['a1']}, за тиждень {s['a7']}\n"
+        f"Нові по днях: {spark}\n\n"
         "📋 <b>Анкети</b>\n"
-        f"Активних: {l['active']} · прихованих: {l['hidden']}\n"
-        f"Нових: за добу +{l['n1']}, за тиждень +{l['n7']}\n"
+        f"Активних: {s['active']} · прихованих: {s['hidden']}\n"
+        f"Нових: за тиждень +{s['l7']}\n"
         f"🤖 Боти: {cats.get('bot', 0)} · 📢 Канали: {cats.get('channel', 0)} · 📦 Інше: {cats.get('other', 0)}\n\n"
         "👁 <b>Каталог</b>\n"
-        f"Переглядів: за добу {e['v1']}, за тиждень {e['v7']}, всього {e['vall']}\n"
-        f"Унікальних глядачів за тиждень: {e['vu7']}\n\n"
+        f"Переглядів: за добу {s['v1']}, за тиждень {s['v7']}, всього {s['vall']}\n\n"
         "⚠️ <b>Скарги</b>\n"
-        f"За тиждень: {e['r7']}"
+        f"За тиждень: {s['r7']}"
     )
-    await c.message.answer(text, reply_markup=admin_kb())
+
+
+def render_stats(s):
+    """Draws the statistics dashboard as a PNG (Pillow + bundled DejaVu fonts)."""
+    from io import BytesIO
+    from PIL import Image, ImageDraw, ImageFont
+    W, H = 1280, 720
+    img = Image.new("RGB", (W, H), ST_BG)
+    d = ImageDraw.Draw(img)
+    f_title = ImageFont.truetype(str(FONT_BOLD), 52)
+    f_big = ImageFont.truetype(str(FONT_BOLD), 66)
+    f_lbl = ImageFont.truetype(str(FONT_REG), 26)
+    f_bold = ImageFont.truetype(str(FONT_BOLD), 26)
+    f_small = ImageFont.truetype(str(FONT_REG), 22)
+
+    d.text((60, 36), "Статистика бота", font=f_title, fill=ST_PINK)
+
+    cards = [
+        ("Користувачі", s["total"], f"+{s['n7']} за тиждень"),
+        ("Були в боті", s["a7"], f"за добу: {s['a1']}"),
+        ("Активних анкет", s["active"], f"+{s['l7']} за тиждень"),
+        ("Переглядів", s["v7"], f"за добу: {s['v1']}"),
+    ]
+    cw, ch, gap, y = 280, 170, 13, 120
+    for i, (lbl, val, sub) in enumerate(cards):
+        x = 60 + i * (cw + gap)
+        d.rounded_rectangle((x, y, x + cw, y + ch), radius=24, outline=ST_PINK, width=4)
+        d.text((x + 24, y + 22), lbl, font=f_lbl, fill=ST_GREY)
+        d.text((x + 24, y + 58), str(val), font=f_big, fill=ST_WHITE)
+        d.text((x + 24, y + 134), sub, font=f_small, fill=ST_GREY)
+
+    d.text((60, 330), "Нові користувачі за 7 днів", font=f_bold, fill=ST_WHITE)
+    base, top = 640, 400
+    vals = [v for _, v in s["days"]]
+    mx = max(vals) or 1
+    bw, bgap = 78, 26
+    for i, (lbl, v) in enumerate(s["days"]):
+        x = 60 + i * (bw + bgap)
+        h = max(6, round(v / mx * (base - top))) if v else 6
+        d.rounded_rectangle((x, base - h, x + bw, base), radius=10, fill=ST_PINK if v else (60, 60, 60))
+        d.text((x + bw / 2, base - h - 30), str(v), font=f_bold, fill=ST_WHITE, anchor="mm")
+        d.text((x + bw / 2, base + 26), lbl, font=f_small, fill=ST_GREY, anchor="mm")
+
+    cats = s["cats"]
+    details = [
+        ("Нових за добу", f"+{s['n1']}"),
+        ("Нових за місяць", f"+{s['n30']}"),
+        ("Забанено", s["banned"]),
+        ("Анкети: боти", cats.get("bot", 0)),
+        ("Анкети: канали", cats.get("channel", 0)),
+        ("Анкети: інше", cats.get("other", 0)),
+        ("Прихованих анкет", s["hidden"]),
+        ("Скарг за тиждень", s["r7"]),
+    ]
+    for i, (lbl, val) in enumerate(details):
+        yy = 380 + i * 36
+        d.text((860, yy), lbl, font=f_lbl, fill=ST_GREY)
+        d.text((1220, yy), str(val), font=f_bold, fill=ST_PINK, anchor="ra")
+
+    buf = BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+@ar.callback_query(F.data == "adm:stats")
+async def stats(c: CallbackQuery):
+    s = await stats_data()
+    try:
+        png = render_stats(s)
+        await c.message.answer_photo(BufferedInputFile(png, filename="stats.png"), reply_markup=admin_kb())
+    except Exception:
+        logging.exception("stats image failed, sending text instead")
+        await c.message.answer(stats_text(s), reply_markup=admin_kb())
     await c.answer()
 
 
