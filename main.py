@@ -83,6 +83,14 @@ T = {
             "To see more listings, subscribe to the channel: {ch}"),
     "b_sub": ("📢 Подписаться", "📢 Підписатися", "📢 Subscribe"),
     "b_admin": ("🛠 Адмін-панель", "🛠 Адмін-панель", "🛠 Адмін-панель"),
+    "b_tasks": ("📋 Мои задания", "📋 Мої завдання", "📋 My tasks"),
+    "tasks_head": ("📋 <b>Мои задания</b>\n\nЗдесь видно, что вы уже сделали и что ждёт подтверждения автора.",
+                   "📋 <b>Мої завдання</b>\n\nТут видно, що ви вже зробили і що чекає підтвердження автора.",
+                   "📋 <b>My tasks</b>\n\nSee what you have already done and what is waiting for the author's confirmation."),
+    "tk_pending": ("⏳ На просмотре у заказчика", "⏳ На перегляді у замовника", "⏳ Waiting for the author"),
+    "tk_done": ("✅ Выполнено", "✅ Виконано", "✅ Done"),
+    "tk_rejected": ("❌ Не засчитано", "❌ Не зараховано", "❌ Not counted"),
+    "tk_empty": ("—", "—", "—"),
     "b_cancel": ("❌ Отменить", "❌ Відмінити", "❌ Cancel"),
     "open_link": ("🔗 Открыть ссылку", "🔗 Відкрити посилання", "🔗 Open link"),
     "b_skip": ("⏭ Пропустить", "⏭ Пропустити", "⏭ Skip"),
@@ -477,7 +485,7 @@ def lang_kb():
 def menu_kb(lang, is_admin=False):
     def b(k, cb):
         return B(text=t(lang, k), callback_data=cb)
-    rows = [[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_rating", "rt"), b("b_lang", "lang")], [b("b_support", "sup")]]
+    rows = [[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_rating", "rt"), b("b_lang", "lang")], [b("b_tasks", "tasks"), b("b_support", "sup")]]
     if is_admin:
         rows.append([b("b_admin", "adm")])
     return KB(inline_keyboard=rows)
@@ -856,6 +864,31 @@ def normalize_link(raw):
     if p.scheme not in ("http", "https") or "." not in p.netloc:
         return None
     return urlunparse(p._replace(scheme=p.scheme.lower(), netloc=p.netloc.lower()))
+
+
+# --- my tasks: what I did and what waits for the author ---
+async def tasks_text(uid, lang):
+    rows = await db.fetch("""select c.status, c.created, l.title from claims c
+        join listings l on l.id=c.listing_id where c.giver=$1 order by c.created desc limit 200""", uid)
+
+    def block(statuses, label):
+        items = [x for x in rows if x["status"] in statuses]
+        body = "\n".join(f"• {esc(x['title'][:30])} · {x['created']:%d.%m}" for x in items[:4])
+        if not items:
+            body = t(lang, "tk_empty")
+        more = f"\n… ще {len(items) - 4}" if len(items) > 4 else ""
+        return f"<b>{t(lang, label)} ({len(items)})</b>\n{body}{more}"
+
+    return "\n\n".join([block(("pending", "disputed"), "tk_pending"),
+                         block(("confirmed",), "tk_done"),
+                         block(("rejected", "expired"), "tk_rejected")])
+
+
+@r.callback_query(F.data == "tasks")
+async def tasks_view(c: CallbackQuery, lang):
+    await screen(c, "saved", t(lang, "tasks_head") + "\n\n" + await tasks_text(c.from_user.id, lang),
+                 sub_kb(lang, back="menu"))
+    await c.answer()
 
 
 # --- rules, rating and referral claims ---
