@@ -1,4 +1,5 @@
 import asyncio, hashlib, html, logging, os, re
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import asyncpg
@@ -10,7 +11,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, InlineKeyboardButton as B, InlineKeyboardMarkup as KB
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton as B, InlineKeyboardMarkup as KB
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 logging.basicConfig(level=logging.INFO)
@@ -126,6 +127,42 @@ def menu_kb(lang):
     return KB(inline_keyboard=[[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_lang", "lang")]])
 
 
+# ---------- ILLUSTRATIONS ----------
+IMG_DIR = Path(__file__).parent / "img"
+_file_ids = {}
+
+
+async def send_screen(bot, chat_id, name, text, kb=None):
+    """Sends a message with an illustration on top (img/<name>.png). Falls back to plain text."""
+    path = IMG_DIR / f"{name}.png"
+    if path.exists() and len(text) <= 1024:
+        fid = _file_ids.get(name)
+        try:
+            msg = await bot.send_photo(chat_id, fid or FSInputFile(path), caption=text, reply_markup=kb)
+            if not fid:
+                _file_ids[name] = msg.photo[-1].file_id
+            return msg
+        except Exception:
+            logging.exception("send_photo failed, falling back to text")
+    return await bot.send_message(chat_id, text, reply_markup=kb)
+
+
+async def screen(event, name, text, kb=None):
+    """event: Message or CallbackQuery. For callbacks the old message is removed, so the chat stays clean."""
+    if isinstance(event, CallbackQuery):
+        msg = event.message
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return await send_screen(event.bot, msg.chat.id, name, text, kb)
+    return await send_screen(event.bot, event.chat.id, name, text, kb)
+
+
+def home_kb():
+    return KB(inline_keyboard=[[B(text="🏠", callback_data="menu")]])
+
+
 # ---------- MIDDLEWARE ----------
 class Mw(BaseMiddleware):
     async def __call__(self, handler, event, data):
@@ -143,7 +180,7 @@ class Mw(BaseMiddleware):
         is_cb = isinstance(event, CallbackQuery)
         msg = event.message if is_cb else event
         if row["lang"] is None and not (is_cb and event.data.startswith("sl:")):
-            await msg.answer(t("ru", "choose"), reply_markup=lang_kb())
+            await send_screen(data["bot"], msg.chat.id, "lang", t("ru", "choose"), lang_kb())
             if is_cb:
                 await event.answer()
             return
@@ -158,8 +195,8 @@ class Mw(BaseMiddleware):
                 except Exception:
                     ok = True
                 if not ok:
-                    await msg.answer(t(lang, "sub", ch=esc(ch)),
-                                     reply_markup=KB(inline_keyboard=[[B(text=t(lang, "check"), callback_data="menu")]]))
+                    await send_screen(data["bot"], msg.chat.id, "sub", t(lang, "sub", ch=esc(ch)),
+                                      KB(inline_keyboard=[[B(text=t(lang, "check"), callback_data="menu")]]))
                     if is_cb:
                         await event.answer()
                     return
@@ -183,16 +220,15 @@ class Adm(StatesGroup):
 r = Router()
 
 
-async def send_menu(target, lang, text=None):
-    await target.answer(text or t(lang, "menu"), reply_markup=menu_kb(lang))
+async def send_menu(target, lang, text=None, img="welcome"):
+    await screen(target, img, text or t(lang, "menu"), menu_kb(lang))
 
 
 @r.message(CommandStart())
 async def start(m, lang, state: FSMContext):
     await state.clear()
     w = await setting("welcome_" + lang)
-    await m.answer(w or t(lang, "welcome"))
-    await send_menu(m, lang)
+    await send_menu(m, lang, w or t(lang, "welcome"))
 
 
 @r.message(Command("cancel"))
@@ -204,10 +240,7 @@ async def cancel(m, lang, state: FSMContext):
 @r.callback_query(F.data == "menu")
 async def menu(c: CallbackQuery, lang, state: FSMContext):
     await state.clear()
-    try:
-        await c.message.edit_text(t(lang, "menu"), reply_markup=menu_kb(lang))
-    except Exception:
-        await send_menu(c.message, lang)
+    await send_menu(c, lang)
     await c.answer()
 
 
@@ -218,7 +251,7 @@ async def noop(c: CallbackQuery):
 
 @r.callback_query(F.data == "lang")
 async def lang_choose(c: CallbackQuery):
-    await c.message.answer(t("ru", "choose"), reply_markup=lang_kb())
+    await screen(c, "lang", t("ru", "choose"), lang_kb())
     await c.answer()
 
 
@@ -227,7 +260,7 @@ async def lang_set(c: CallbackQuery):
     lang = c.data[3:]
     if lang in LANGS:
         await db.execute("update users set lang=$2 where id=$1", c.from_user.id, lang)
-        await send_menu(c.message, lang)
+        await send_menu(c, lang)
     await c.answer()
 
 
@@ -236,7 +269,7 @@ async def lang_set(c: CallbackQuery):
 async def new(c: CallbackQuery, lang, state: FSMContext):
     await state.clear()
     rows = [[B(text=t(lang, "c_" + k), callback_data="nc:" + k)] for k in ("bot", "channel", "other")]
-    await c.message.answer(t(lang, "q_cat"), reply_markup=KB(inline_keyboard=rows))
+    await screen(c, "new", t(lang, "q_cat"), KB(inline_keyboard=rows))
     await c.answer()
 
 
@@ -271,14 +304,14 @@ async def new_link(m, lang, state: FSMContext):
     await db.execute("insert into listings(owner,category,title,descr,link) values($1,$2,$3,$4,$5)",
                      m.from_user.id, d["cat"], d["title"], d["desc"], link)
     await state.clear()
-    await send_menu(m, lang, t(lang, "saved"))
+    await send_menu(m, lang, t(lang, "saved"), "saved")
 
 
 # --- catalog ---
 @r.callback_query(F.data == "cat")
 async def cat(c: CallbackQuery, lang):
     rows = [[B(text=t(lang, "c_" + k), callback_data=f"p:{k}:0")] for k in ("all", "bot", "channel", "other")]
-    await c.message.answer(t(lang, "q_cat"), reply_markup=KB(inline_keyboard=rows))
+    await screen(c, "catalog", t(lang, "q_cat"), KB(inline_keyboard=rows))
     await c.answer()
 
 
@@ -291,7 +324,7 @@ async def page(c: CallbackQuery, lang):
         args.append(cat_)
     n = await db.fetchval(f"select count(*) from listings l where {cond}", *args)
     if not n:
-        await c.message.answer(t(lang, "empty"))
+        await screen(c, "empty", t(lang, "empty"), home_kb())
         return await c.answer()
     p = max(0, min(int(p), n - 1))
     x = await db.fetchrow(
@@ -319,6 +352,10 @@ async def page(c: CallbackQuery, lang):
     try:
         await c.message.edit_text(text, reply_markup=kb)
     except Exception:
+        try:
+            await c.message.delete()
+        except Exception:
+            pass
         await c.message.answer(text, reply_markup=kb)
     await c.answer()
 
@@ -344,7 +381,7 @@ async def report(c: CallbackQuery, lang):
 async def my(c: CallbackQuery, lang):
     rows = await db.fetch("select * from listings where owner=$1 order by id desc limit 10", c.from_user.id)
     if not rows:
-        await c.message.answer(t(lang, "empty"))
+        await screen(c, "empty", t(lang, "empty"), home_kb())
     for x in rows:
         st = " " + t(lang, "hidden") if x["status"] == "hidden" else ""
         await c.message.answer(
@@ -542,9 +579,8 @@ async def cleanup_loop(bot: Bot):
             for x in rows:
                 lang = x["lang"] if x["lang"] in LANGS else "ru"
                 try:
-                    await bot.send_message(x["owner"], t(lang, "expiring", t=esc(x["title"])),
-                                           reply_markup=KB(inline_keyboard=[[B(text=t(lang, "renew"),
-                                                                               callback_data=f"lr:{x['id']}")]]))
+                    await send_screen(bot, x["owner"], "expire", t(lang, "expiring", t=esc(x["title"])),
+                                      KB(inline_keyboard=[[B(text=t(lang, "renew"), callback_data=f"lr:{x['id']}")]]))
                 except Exception:
                     pass
                 await db.execute("update listings set warned=true where id=$1", x["id"])
