@@ -54,9 +54,9 @@ T = {
     "c_channel": ("📢 Канал", "📢 Канал", "📢 Channel"),
     "c_other": ("📦 Другое", "📦 Інше", "📦 Other"),
     "q_cat": ("Выберите категорию:", "Оберіть категорію:", "Choose a category:"),
-    "q_title": ("Шаг 2 из 4. Название сервиса, например @MyBot (до 60 символов):",
-                "Крок 2 з 4. Назва сервісу, наприклад @MyBot (до 60 символів):",
-                "Step 2 of 4. Service name, e.g. @MyBot (up to 60 chars):"),
+    "q_title": ("Шаг 2 из 4. Название сервиса, например MyBot (до 60 символов):",
+                "Крок 2 з 4. Назва сервісу, наприклад MyBot (до 60 символів):",
+                "Step 2 of 4. Service name, e.g. MyBot (up to 60 chars):"),
     "q_desc": ("Шаг 3 из 4. Описание (необязательно): что нужно сделать, например «подпишись на спонсоров, потом запусти фрикейс». До 300 символов.",
                "Крок 3 з 4. Опис (необов'язково): що треба зробити, наприклад «підпишись на спонсорів, потім запусти фрікейс». До 300 символів.",
                "Step 3 of 4. Description (optional): what to do, e.g. “subscribe to the sponsors, then spin the free case”. Up to 300 chars."),
@@ -84,6 +84,7 @@ T = {
     "b_sub": ("📢 Подписаться", "📢 Підписатися", "📢 Subscribe"),
     "b_admin": ("🛠 Адмін-панель", "🛠 Адмін-панель", "🛠 Адмін-панель"),
     "b_cancel": ("❌ Отменить", "❌ Відмінити", "❌ Cancel"),
+    "open_link": ("🔗 Открыть ссылку", "🔗 Відкрити посилання", "🔗 Open link"),
     "b_skip": ("⏭ Пропустить", "⏭ Пропустити", "⏭ Skip"),
     "need_text": ("Нужен текст. Напишите сообщением или нажмите «Отменить».", "Потрібен текст. Напишіть повідомленням або натисніть «Відмінити».",
                   "Text is needed. Write a message or tap “Cancel”."),
@@ -204,9 +205,9 @@ def t(lang, key, **kw):
 DEFAULTS = {"ttl_days": "30", "report_threshold": "3", "sub_required": "0", "sub_channel": "",
             "welcome_ru": "", "welcome_uk": "", "welcome_en": "",
             "claim_days": "3", "open_claims_max": "3", "pair_cooldown_days": "30",
-            "debt_limit": "2", "penalty_per_strike": "3", "disputes_per_10": "5"}
+            "debt_limit": "2", "penalty_per_strike": "3", "disputes_per_10": "5", "catalog_link": "0"}
 NUM_KEYS = ("ttl_days", "report_threshold", "claim_days", "open_claims_max",
-            "pair_cooldown_days", "debt_limit", "penalty_per_strike", "disputes_per_10")
+            "pair_cooldown_days", "debt_limit", "penalty_per_strike", "disputes_per_10", "catalog_link")
 
 
 async def setting(k):
@@ -730,6 +731,8 @@ async def show_page(c, lang, cat_, p):
         else:
             url = f"tg://user?id={x['owner']}"
             text += f"\n\n<i>{t(lang, 'hint')}</i>"
+        if await setting("catalog_link") == "1":
+            rows.append([B(text=t(lang, "open_link"), url=x["link"])])
         rows += [[B(text=t(lang, "claim"), callback_data=f"cl:{x['id']}")],
                  [B(text=t(lang, "skip"), callback_data=f"sk:{x['id']}:{cat_}:{p}")],
                  [B(text=t(lang, "write"), url=url)],
@@ -796,7 +799,7 @@ async def my(c: CallbackQuery, lang):
         if x["rules_hidden"]:
             st += " " + t(lang, "rules_hidden")
         await c.message.answer(
-            f"{t(lang, 'c_' + x['category'])}{st}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}\n🔗 {esc(x['link'])}",
+            f"{t(lang, 'c_' + x['category'])}{st}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}\n🔗 <a href='{esc(x['link'])}'>{esc(x['link'])}</a>",
             reply_markup=KB(inline_keyboard=[[B(text=t(lang, "renew"), callback_data=f"lr:{x['id']}"),
                                               B(text=t(lang, "delete"), callback_data=f"ld:{x['id']}")]]))
     await c.answer()
@@ -1001,6 +1004,7 @@ SET_NAMES = {"ttl_days": "Термін життя анкети (дні)", "repor
              "debt_limit": "Поріг боргу (анкета ховається)",
              "penalty_per_strike": "Штраф за фейк (відпрацювань і рейтингу)",
              "disputes_per_10": "Спорів на кожні 10 заявок до вас (5 = половина)",
+             "catalog_link": "Кнопка з посиланням у каталозі (1 - так, 0 - ні)",
              "welcome_ru": "Привітання RU", "welcome_uk": "Привітання UK", "welcome_en": "Привітання EN"}
 
 
@@ -1182,7 +1186,7 @@ async def next_report(target):
         return await target.answer("Черга скарг порожня ✅", reply_markup=admin_kb())
     await target.answer(
         f"#{x['id']} | автор <code>{x['owner']}</code> | скарг: {x['rc']}\n<b>{esc(x['title'])}</b>\n"
-        f"{esc(x['descr'])}\n🔗 {esc(x['link'])}",
+        f"{esc(x['descr'])}\n🔗 <a href='{esc(x['link'])}'>{esc(x['link'])}</a>",
         reply_markup=KB(inline_keyboard=[[B(text="✅ Повернути", callback_data=f"ao:{x['id']}"),
                                           B(text="🗑 Видалити", callback_data=f"ad:{x['id']}")],
                                          [B(text="🚫 Забанити автора", callback_data=f"ab:{x['id']}")]]))
