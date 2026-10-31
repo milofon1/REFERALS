@@ -14,7 +14,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (BufferedInputFile, CallbackQuery, FSInputFile, InlineKeyboardButton as B,
-                           InlineKeyboardMarkup as KB, InputMediaPhoto)
+                           InlineKeyboardMarkup as KB, InputMediaPhoto, Message)
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 logging.basicConfig(level=logging.INFO)
@@ -77,6 +77,103 @@ T = {
             "To see more listings, subscribe to the channel: {ch}"),
     "b_sub": ("📢 Подписаться", "📢 Підписатися", "📢 Subscribe"),
     "b_admin": ("🛠 Адмін-панель", "🛠 Адмін-панель", "🛠 Адмін-панель"),
+    "b_rating": ("🏆 Рейтинг", "🏆 Рейтинг", "🏆 Rating"),
+    "b_rules": ("⚖️ Правила", "⚖️ Правила", "⚖️ Rules"),
+    "b_back": ("◀️ Назад", "◀️ Назад", "◀️ Back"),
+    "b_what": ("❓ Что такое рейтинг", "❓ Що таке рейтинг", "❓ What is rating"),
+    "b_strikes": ("⚠️ Страйки и штрафы", "⚠️ Страйки і штрафи", "⚠️ Strikes and penalties"),
+    "b_top": ("🥇 Топ", "🥇 Топ", "🥇 Top"),
+    "b_accept": ("✅ Согласен", "✅ Погоджуюсь", "✅ I agree"),
+    "claim": ("✅ Я сделал реферал", "✅ Я зробив реферал", "✅ I made a referral"),
+    "yes_btn": ("✅ Подтвердить", "✅ Підтвердити", "✅ Confirm"),
+    "no_btn": ("❌ Не было", "❌ Не було", "❌ Not done"),
+    "rules_hidden": ("(скрыта: правила)", "(прихована: правила)", "(hidden: rules)"),
+    "claim_ask": ("Пришлите скриншот регистрации по этой ссылке (фото). Без доказательства заявка не создаётся.",
+                  "Надішліть скриншот реєстрації за цим посиланням (фото). Без доказу заявка не створюється.",
+                  "Send a screenshot of your sign-up through this link (photo). Without proof the claim is not created."),
+    "claim_need_photo": ("Нужен скриншот. Пришлите фото или /cancel.", "Потрібен скриншот. Надішліть фото або /cancel.",
+                         "A screenshot is needed. Send a photo or /cancel."),
+    "claim_sent": ("✅ Заявка отправлена автору. Если он не ответит за {d} дн., реферал засчитается автоматически.",
+                   "✅ Заявку надіслано автору. Якщо він не відповість за {d} дн., реферал зарахується автоматично.",
+                   "✅ Claim sent to the author. If there is no answer in {d} days, it counts automatically."),
+    "claim_author": ("🔔 Кто-то утверждает, что сделал реферал на вашу анкету «{t}». Проверьте доказательство выше и подтвердите. Без ответа за {d} дн. засчитаем автоматически.",
+                     "🔔 Хтось стверджує, що зробив реферал на вашу анкету «{t}». Перевірте доказ вище і підтвердіть. Без відповіді за {d} дн. зарахуємо автоматично.",
+                     "🔔 Someone says they made a referral on your listing “{t}”. Check the proof above and confirm. No answer in {d} days and it counts automatically."),
+    "claim_ok": ("✅ Реферал засчитан. Рейтинг и баланс обновлены.", "✅ Реферал зараховано. Рейтинг і баланс оновлено.",
+                 "✅ Referral counted. Rating and balance updated."),
+    "claim_fake": ("⚠️ Заявка признана фейковой: страйк +1, штраф {n} отработок, рейтинг −{n}. Отработки — подтверждённые рефералы для других. После них анкета снова видна.",
+                   "⚠️ Заявку визнано фейковою: страйк +1, штраф {n} відпрацювань, рейтинг −{n}. Відпрацювання — підтверджені реферали для інших. Після них анкета знову видна.",
+                   "⚠️ Claim marked as fake: strike +1, penalty {n} make-ups, rating −{n}. Make-ups are confirmed referrals for others. After them your listing is visible again."),
+    "claim_disputed": ("⚖️ Автор возразил. Спор рассмотрит администратор, мы сообщим результат.",
+                       "⚖️ Автор заперечив. Спір розгляне адміністратор, ми повідомимо результат.",
+                       "⚖️ The author disputed it. An admin will review it and we will let you know."),
+    "dispute_sent": ("Спор открыт. Администратор посмотрит доказательство.", "Спір відкрито. Адміністратор перегляне доказ.",
+                     "Dispute opened. An admin will review the proof."),
+    "b_support": ("🆘 Поддержка", "🆘 Підтримка", "🆘 Support"),
+    "skip": ("⏭ Уже зарегистрирован", "⏭ Вже зареєстрований", "⏭ Already registered"),
+    "sup_ask": ("Опишите вопрос или предложение одним сообщением (текст или фото). /cancel — отмена.",
+                "Опишіть питання або пропозицію одним повідомленням (текст або фото). /cancel — скасувати.",
+                "Describe your question or suggestion in one message (text or photo). /cancel to stop."),
+    "sup_sent": ("✅ Спасибо! Ответим здесь, в этом чате.", "✅ Дякуємо! Відповімо тут, у цьому чаті.",
+                 "✅ Thanks! We will reply here, in this chat."),
+    "sup_reply": ("💬 <b>Ответ поддержки</b>\n\n{text}", "💬 <b>Відповідь підтримки</b>\n\n{text}",
+                  "💬 <b>Support reply</b>\n\n{text}"),
+    "lock_debt": ("🔒 Ваши анкеты скрыты из каталога: разница рефералов {d} (вам сделали больше, чем вы). Сделайте рефералы для других пользователей, и анкеты вернутся автоматически.",
+                  "🔒 Ваші анкети приховано з каталогу: різниця рефералів {d} (вам зробили більше, ніж ви). Зробіть реферали для інших, і анкети повернуться автоматично.",
+                  "🔒 Your listings are hidden from the catalog: referral gap {d} (you received more than you gave). Make referrals for others and they come back automatically."),
+    "lock_penalty": ("🔒 Ваши анкеты скрыты из каталога: нужно отработать штраф ({p}). Сделайте подтверждённые рефералы для других, и анкеты вернутся автоматически.",
+                     "🔒 Ваші анкети приховано з каталогу: потрібно відпрацювати штраф ({p}). Зробіть підтверджені реферали для інших, і анкети повернуться автоматично.",
+                     "🔒 Your listings are hidden from the catalog: {p} make-ups owed. Make confirmed referrals for others and they come back automatically."),
+    "unlock": ("✅ Ваши анкеты снова видны в каталоге.", "✅ Ваші анкети знову видно в каталозі.",
+               "✅ Your listings are visible in the catalog again."),
+    "claim_remind": ("⏰ Завтра заявка на «{t}» засчитается автоматически. Проверьте её и подтвердите или отклоните.",
+                     "⏰ Завтра заявка на «{t}» зарахується автоматично. Перевірте її і підтвердіть або відхиліть.",
+                     "⏰ Tomorrow the claim on “{t}” counts automatically. Check it and confirm or decline."),
+    "dispute_limit": ("Лимит споров исчерпан. Подтвердите заявку или дождитесь автозачёта.",
+                      "Ліміт спорів вичерпано. Підтвердіть заявку або дочекайтесь автозарахування.",
+                      "Dispute limit reached. Confirm the claim or wait for the automatic count."),
+    "claim_done": ("Заявка уже рассмотрена.", "Заявку вже розглянуто.", "This claim is already decided."),
+    "claim_gone": ("Анкета больше не доступна.", "Анкета більше не доступна.", "This listing is no longer available."),
+    "claim_age": ("Заявки можно подавать через {d} дн. после начала работы в боте.",
+                  "Заявки можна подавати через {d} дн. після початку роботи в боті.",
+                  "Claims open {d} days after you start using the bot."),
+    "claim_limit": ("Слишком много открытых заявок. Дождитесь решения по ним.",
+                    "Забагато відкритих заявок. Дочекайтесь рішень по них.", "Too many open claims. Wait for the decisions."),
+    "claim_pair": ("Заявка этому автору уже открыта или недавно засчитана. Попробуйте позже.",
+                   "Заявка цьому автору вже відкрита або нещодавно зарахована. Спробуйте пізніше.",
+                   "A claim for this author is already open or was counted recently. Try later."),
+    "rules_text": ("⚖️ <b>Правила взаимных рефералов</b>\n\n"
+                   "1. Реферал — это реальная регистрация по ссылке автора. Фейки запрещены.\n"
+                   "2. Заявка без скриншота не создаётся. Доказательство видят автор и администратор.\n"
+                   "3. У автора {days} дн. на ответ. Без ответа реферал засчитывается автоматически.\n"
+                   "4. Фейк, подтверждённый администратором: −{pen} к рейтингу, страйк и {pen} отработок. Пока штраф не отработан, анкета скрыта.\n"
+                   "5. Разница между полученными и сделанными рефералами не больше {debt}. Иначе анкета скрыта, пока не выровняете.\n\n"
+                   "Нажимая «Согласен», вы принимаете эти правила.",
+                   "⚖️ <b>Правила взаємних рефералів</b>\n\n"
+                   "1. Реферал — це реальна реєстрація за посиланням автора. Фейки заборонені.\n"
+                   "2. Заявка без скриншота не створюється. Доказ бачать автор і адміністратор.\n"
+                   "3. У автора {days} дн. на відповідь. Без відповіді реферал зараховується автоматично.\n"
+                   "4. Фейк, підтверджений адміністратором: −{pen} до рейтингу, страйк і {pen} відпрацювань. Поки штраф не відпрацьовано, анкета прихована.\n"
+                   "5. Різниця між отриманими і зробленими рефералами не більша за {debt}. Інакше анкета прихована, доки не вирівняєте.\n\n"
+                   "Натискаючи «Погоджуюсь», ви приймаєте ці правила.",
+                   "⚖️ <b>Mutual referral rules</b>\n\n"
+                   "1. A referral is a real sign-up through the author's link. Fakes are not allowed.\n"
+                   "2. A claim without a screenshot is not created. The author and an admin see the proof.\n"
+                   "3. The author has {days} days to answer. No answer and the referral counts automatically.\n"
+                   "4. A fake confirmed by an admin: −{pen} rating, a strike and {pen} make-ups. Until the penalty is worked off, your listing is hidden.\n"
+                   "5. The gap between received and given referrals must not exceed {debt}. Otherwise your listing is hidden until you balance it.\n\n"
+                   "By tapping “I agree” you accept these rules."),
+    "rt_main": ("🏆 <b>Ваш рейтинг</b>\n\nРейтинг: <b>{s}</b>\nСделано рефералов: {g}\nПолучено рефералов: {r}\nДолг по балансу: {d}\nСтрайки: {st}\nОтработать штрафа: {p}",
+                "🏆 <b>Ваш рейтинг</b>\n\nРейтинг: <b>{s}</b>\nЗроблено рефералів: {g}\nОтримано рефералів: {r}\nБорг за балансом: {d}\nСтрайки: {st}\nВідпрацювати штрафу: {p}",
+                "🏆 <b>Your rating</b>\n\nRating: <b>{s}</b>\nReferrals given: {g}\nReferrals received: {r}\nBalance debt: {d}\nStrikes: {st}\nMake-ups owed: {p}"),
+    "rt_what_text": ("❓ <b>Что такое рейтинг</b>\n\nРейтинг — ваша репутация в боте.\n+1 за каждый подтверждённый реферал, который вы сделали другим.\n−{pen} за фейк, подтверждённый администратором.\n\nРейтинг не прячет анкету, но показывает, насколько вы надёжны. Топ обновляется сам.",
+                     "❓ <b>Що таке рейтинг</b>\n\nРейтинг — ваша репутація в боті.\n+1 за кожен підтверджений реферал, який ви зробили іншим.\n−{pen} за фейк, підтверджений адміністратором.\n\nРейтинг не ховає анкету, але показує, наскільки ви надійні. Топ оновлюється сам.",
+                     "❓ <b>What is rating</b>\n\nRating is your reputation in the bot.\n+1 for each confirmed referral you made for someone else.\n−{pen} for a fake confirmed by an admin.\n\nRating does not hide your listing, but shows how reliable you are. The top updates automatically."),
+    "rt_strikes_text": ("⚠️ <b>Страйки и штрафы</b>\n\nСтрайк — фейковая заявка, подтверждённая администратором.\nЗа каждый страйк: {pen} отработок и −{pen} к рейтингу.\nОтработка — подтверждённый реферал, который вы делаете для других. Каждая закрывает один пункт штрафа.\nПока штраф не отработан, анкета скрыта из каталога.",
+                       "⚠️ <b>Страйки і штрафи</b>\n\nСтрайк — фейкова заявка, підтверджена адміністратором.\nЗа кожен страйк: {pen} відпрацювань і −{pen} до рейтингу.\nВідпрацювання — підтверджений реферал, який ви робите для інших. Кожне закриває один пункт штрафу.\nПоки штраф не відпрацьовано, анкета прихована з каталогу.",
+                       "⚠️ <b>Strikes and penalties</b>\n\nA strike is a fake claim confirmed by an admin.\nEach strike: {pen} make-ups and −{pen} rating.\nA make-up is a confirmed referral you make for others. Each one clears one point of the penalty.\nWhile the penalty is not worked off, your listing is hidden from the catalog."),
+    "rt_top_title": ("🥇 <b>Топ рейтинга</b>\n\n", "🥇 <b>Топ рейтингу</b>\n\n", "🥇 <b>Rating top</b>\n\n"),
+    "rt_top_empty": ("Пока пусто.", "Поки порожньо.", "Nothing here yet."),
     "cat_head": ("🔎 <b>Каталог</b>\n───────────\nЧто ищем сегодня?",
                  "🔎 <b>Каталог</b>\n───────────\nЩо шукаємо сьогодні?",
                  "🔎 <b>Catalog</b>\n───────────\nWhat are we looking for today?"),
@@ -95,7 +192,11 @@ def t(lang, key, **kw):
 
 
 DEFAULTS = {"ttl_days": "30", "report_threshold": "3", "sub_required": "0", "sub_channel": "",
-            "welcome_ru": "", "welcome_uk": "", "welcome_en": ""}
+            "welcome_ru": "", "welcome_uk": "", "welcome_en": "",
+            "claim_days": "3", "open_claims_max": "3", "pair_cooldown_days": "30",
+            "debt_limit": "2", "penalty_per_strike": "3", "disputes_per_10": "5"}
+NUM_KEYS = ("ttl_days", "report_threshold", "claim_days", "open_claims_max",
+            "pair_cooldown_days", "debt_limit", "penalty_per_strike", "disputes_per_10")
 
 
 async def setting(k):
@@ -138,6 +239,24 @@ alter table users add column if not exists last_seen timestamptz;
 create table if not exists events(id bigserial primary key, uid bigint not null, kind text not null,
   created timestamptz not null default now());
 create index if not exists events_created on events(created);
+alter table users add column if not exists rules_ok boolean not null default false;
+alter table users add column if not exists given int not null default 0;
+alter table users add column if not exists received int not null default 0;
+alter table users add column if not exists score int not null default 0;
+alter table users add column if not exists strikes int not null default 0;
+alter table users add column if not exists penalty_due int not null default 0;
+alter table listings add column if not exists rules_hidden boolean not null default false;
+create table if not exists claims(id bigserial primary key, listing_id int not null references listings(id) on delete cascade,
+  giver bigint not null, receiver bigint not null, proof text not null, status text not null default 'pending',
+  created timestamptz not null default now(), decided timestamptz, disputed_at timestamptz);
+create index if not exists claims_giver on claims(giver, status);
+create index if not exists claims_pair on claims(giver, receiver, status);
+alter table users add column if not exists locked boolean not null default false;
+alter table claims add column if not exists reminded boolean not null default false;
+create table if not exists skips(uid bigint not null, listing_id int not null references listings(id) on delete cascade,
+  primary key(uid, listing_id));
+create table if not exists support_tickets(id bigserial primary key, uid bigint not null, mid bigint,
+  status text not null default 'open', created timestamptz not null default now());
 """
 
 
@@ -151,7 +270,7 @@ async def log_event(uid, kind):
 
 
 async def cat_counts():
-    rows = await db.fetch("select category, count(*) n from listings where status='active' group by category")
+    rows = await db.fetch("select category, count(*) n from listings where status='active' and not rules_hidden group by category")
     return {x["category"]: x["n"] for x in rows}
 
 
@@ -168,6 +287,175 @@ def cat_kb(lang, cb, counts=None):
     return KB(inline_keyboard=rows)
 
 
+# ---------- RATING, RULES AND CLAIMS (helpers) ----------
+async def user_lang(uid):
+    lang = await db.fetchval("select lang from users where id=$1", uid)
+    return lang if lang in LANGS else "ru"
+
+
+async def notify(bot, uid, key, **kw):
+    try:
+        await bot.send_message(uid, t(await user_lang(uid), key, **kw))
+    except Exception:
+        pass
+
+
+async def refresh_rules(uid, bot=None):
+    """Hides the owner's listings while the balance gap or an unpaid penalty is too high, and tells the owner once."""
+    u = await db.fetchrow("select given, received, penalty_due, locked from users where id=$1", uid)
+    if not u:
+        return
+    debt = u["received"] - u["given"]
+    locked = debt >= int(await setting("debt_limit")) or u["penalty_due"] > 0
+    await db.execute("update listings set rules_hidden=$2 where owner=$1", uid, locked)
+    if locked == u["locked"]:
+        return
+    await db.execute("update users set locked=$2 where id=$1", uid, locked)
+    has_listings = await db.fetchval("select exists(select 1 from listings where owner=$1)", uid)
+    if bot is None or not has_listings:
+        return
+    if not locked:
+        await notify(bot, uid, "unlock")
+    elif u["penalty_due"] > 0:
+        await notify(bot, uid, "lock_penalty", p=u["penalty_due"])
+    else:
+        await notify(bot, uid, "lock_debt", d=debt)
+
+
+async def claim_block_reason(uid, owner, lang):
+    open_n = await db.fetchval("select count(*) from claims where giver=$1 and status in ('pending','disputed')", uid)
+    if open_n >= int(await setting("open_claims_max")):
+        return t(lang, "claim_limit")
+    busy = await db.fetchval(
+        """select 1 from claims where giver=$1 and receiver=$2 and (status in ('pending','disputed')
+           or (status='confirmed' and decided > now() - make_interval(days => $3))) limit 1""",
+        uid, owner, int(await setting("pair_cooldown_days")))
+    return t(lang, "claim_pair") if busy else None
+
+
+async def dispute_limit_hit(uid):
+    """Ratio cap: at most disputes_per_10 out of every 10 claims received (rounded up), counting this one."""
+    received = await db.fetchval("select count(*) from claims where receiver=$1", uid)
+    disputed = await db.fetchval("select count(*) from claims where receiver=$1 and disputed_at is not null", uid)
+    per10 = int(await setting("disputes_per_10"))
+    allowed = -(-received * per10 // 10)
+    return disputed + 1 > allowed
+
+
+
+async def claim_card(cid):
+    return await db.fetchrow(
+        """select c.id, c.giver, c.receiver, c.proof, l.id lid, l.title
+           from claims c join listings l on l.id=c.listing_id where c.id=$1""", cid)
+
+
+async def apply_confirmed(bot, cid):
+    """Counts a referral as done. Guarded by status, so a double tap or a race cannot count it twice."""
+    row = await db.fetchrow("""update claims set status='confirmed', decided=now()
+        where id=$1 and status in ('pending','disputed') returning giver, receiver""", cid)
+    if not row:
+        return False
+    g, rc = row["giver"], row["receiver"]
+    await db.execute("update users set given=given+1, score=score+1 where id=$1", g)
+    await db.execute("update users set received=received+1 where id=$1", rc)
+    await db.execute("update users set penalty_due=penalty_due-1 where id=$1 and penalty_due>0", g)
+    await refresh_rules(g, bot)
+    await refresh_rules(rc, bot)
+    await notify(bot, g, "claim_ok")
+    await notify(bot, rc, "claim_ok")
+    return True
+
+
+async def reject_claim(bot, cid):
+    row = await db.fetchrow("""update claims set status='rejected', decided=now()
+        where id=$1 and status in ('pending','disputed') returning giver""", cid)
+    if not row:
+        return False
+    per = int(await setting("penalty_per_strike"))
+    await db.execute("update users set strikes=strikes+1, penalty_due=penalty_due+$2, score=score-$2 where id=$1",
+                     row["giver"], per)
+    await refresh_rules(row["giver"], bot)
+    await notify(bot, row["giver"], "claim_fake", n=per)
+    return True
+
+
+async def send_claim_to_author(bot, cid):
+    card = await claim_card(cid)
+    lang = await user_lang(card["receiver"])
+    kb = KB(inline_keyboard=[[B(text=t(lang, "yes_btn"), callback_data=f"cf:{cid}"),
+                              B(text=t(lang, "no_btn"), callback_data=f"cd:{cid}")]])
+    try:
+        await bot.send_photo(card["receiver"], card["proof"],
+                             caption=t(lang, "claim_author", t=esc(card["title"]), d=await setting("claim_days")),
+                             reply_markup=kb)
+    except Exception:
+        logging.exception("could not send the claim to the author")
+
+
+def dispute_caption(card):
+    return (f"⚖️ Спір #{card['id']}\nЗаявник: <code>{card['giver']}</code>\nАвтор: <code>{card['receiver']}</code>\n"
+            f"Анкета #{card['lid']} «{esc(card['title'])}»\nДоказ заявника — вище.")
+
+
+def dispute_kb(cid):
+    return KB(inline_keyboard=[[B(text="✅ Зарахувати", callback_data=f"dv:{cid}:ok"),
+                                B(text="❌ Фейк", callback_data=f"dv:{cid}:fake")]])
+
+
+async def notify_admins_dispute(bot, cid):
+    card = await claim_card(cid)
+    for a in ADMIN_IDS:
+        try:
+            await bot.send_photo(a, card["proof"], caption=dispute_caption(card), reply_markup=dispute_kb(cid))
+        except Exception:
+            logging.exception("could not send the dispute to admin")
+
+
+async def claims_expiry(bot):
+    """Reminds the author a day before, auto-counts unanswered claims, closes disputes nobody decided within 7 days."""
+    try:
+        days = int(await setting("claim_days"))
+        if days > 1:
+            for x in await db.fetch("""select c.id, c.receiver, l.title from claims c join listings l on l.id=c.listing_id
+                    where c.status='pending' and not c.reminded and c.created < now() - make_interval(days => $1)""", days - 1):
+                await db.execute("update claims set reminded=true where id=$1", x["id"])
+                await notify(bot, x["receiver"], "claim_remind", t=esc(x["title"]))
+        for x in await db.fetch("select id from claims where status='pending' and created < now() - make_interval(days => $1)", days):
+            await apply_confirmed(bot, x["id"])
+        await db.execute("""update claims set status='expired', decided=now()
+            where status='disputed' and disputed_at < now() - interval '7 days'""")
+    except Exception:
+        logging.exception("claims expiry failed")
+
+
+async def rules_caption(lang):
+    return t(lang, "rules_text", days=await setting("claim_days"), pen=await setting("penalty_per_strike"),
+             debt=await setting("debt_limit"))
+
+
+async def rating_text(uid, lang):
+    u = await db.fetchrow("select score, strikes, given, received, penalty_due from users where id=$1", uid)
+    return t(lang, "rt_main", s=u["score"], g=u["given"], r=u["received"], d=max(0, u["received"] - u["given"]),
+             st=u["strikes"], p=u["penalty_due"])
+
+
+def rules_kb(lang, accept=True):
+    rows = [[B(text=t(lang, "b_accept"), callback_data="rules:ok")]] if accept else []
+    rows.append([B(text="🏠", callback_data="menu")])
+    return KB(inline_keyboard=rows)
+
+
+def rating_kb(lang):
+    return KB(inline_keyboard=[
+        [B(text=t(lang, "b_what"), callback_data="rt:what"), B(text=t(lang, "b_strikes"), callback_data="rt:strikes")],
+        [B(text=t(lang, "b_top"), callback_data="rt:top"), B(text=t(lang, "b_rules"), callback_data="rules:view")],
+        [B(text="🏠", callback_data="menu")]])
+
+
+def sub_kb(lang, back="rt"):
+    return KB(inline_keyboard=[[B(text=t(lang, "b_back"), callback_data=back)], [B(text="🏠", callback_data="menu")]])
+
+
 # ---------- KEYBOARDS ----------
 def lang_kb():
     return KB(inline_keyboard=[[B(text="🇷🇺 Русский", callback_data="sl:ru"),
@@ -178,7 +466,7 @@ def lang_kb():
 def menu_kb(lang, is_admin=False):
     def b(k, cb):
         return B(text=t(lang, k), callback_data=cb)
-    rows = [[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_lang", "lang")]]
+    rows = [[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_rating", "rt"), b("b_lang", "lang")], [b("b_support", "sup")]]
     if is_admin:
         rows.append([b("b_admin", "adm")])
     return KB(inline_keyboard=rows)
@@ -186,7 +474,7 @@ def menu_kb(lang, is_admin=False):
 
 # ---------- ILLUSTRATIONS ----------
 ROOT_DIR = Path(__file__).parent
-IMG_DIRS = [ROOT_DIR / "img", ROOT_DIR]  # works whether images are in img/ or next to main.py
+IMG_DIRS = [ROOT_DIR]  # all images sit next to main.py
 _file_ids = {}
 
 
@@ -284,6 +572,7 @@ class New(StatesGroup):
 class Adm(StatesGroup):
     val = State()
     bc = State()
+    reply = State()
 
 
 # ---------- USER ROUTER ----------
@@ -373,6 +662,7 @@ async def new_link(m, lang, state: FSMContext):
     await db.execute("insert into listings(owner,category,title,descr,link) values($1,$2,$3,$4,$5)",
                      m.from_user.id, d["cat"], d["title"], d["desc"], link)
     await log_event(m.from_user.id, "create")
+    await refresh_rules(m.from_user.id, m.bot)
     await state.clear()
     await send_menu(m, lang, t(lang, "saved"), "saved")
 
@@ -380,8 +670,52 @@ async def new_link(m, lang, state: FSMContext):
 # --- catalog ---
 @r.callback_query(F.data == "cat")
 async def cat(c: CallbackQuery, lang):
+    if not await db.fetchval("select rules_ok from users where id=$1", c.from_user.id):
+        await screen(c, "rules", await rules_caption(lang), rules_kb(lang))
+        return await c.answer()
     counts = await cat_counts()
     await screen(c, "catalog", t(lang, "cat_head"), cat_kb(lang, lambda k: f"p:{k}:0", counts))
+    await c.answer()
+
+
+async def show_page(c, lang, cat_, p):
+    cond, args = "l.status='active' and not l.rules_hidden", []
+    if cat_ != "all":
+        args.append(cat_)
+        cond += f" and l.category=${len(args)}"
+    args.append(c.from_user.id)
+    cond += f" and not exists (select 1 from skips s where s.uid=${len(args)} and s.listing_id=l.id)"
+    n = await db.fetchval(f"select count(*) from listings l where {cond}", *args)
+    if not n:
+        await screen(c, "empty", t(lang, "empty"), home_kb())
+        return await c.answer()
+    p = max(0, min(int(p), n - 1))
+    x = await db.fetchrow(
+        f"select l.*, u.username from listings l join users u on u.id=l.owner where {cond} "
+        f"order by l.updated desc, l.id offset {p} limit 1", *args)
+    await log_event(c.from_user.id, "view")
+    text = f"{t(lang, 'c_' + x['category'])}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}"
+    rows = []
+    if x["owner"] == c.from_user.id:
+        text += f"\n\n<i>{t(lang, 'yours')}</i>"
+    else:
+        if x["username"]:
+            url = f"https://t.me/{x['username']}"
+        else:
+            url = f"tg://user?id={x['owner']}"
+            text += f"\n\n<i>{t(lang, 'hint')}</i>"
+        rows += [[B(text=t(lang, "claim"), callback_data=f"cl:{x['id']}")],
+                 [B(text=t(lang, "skip"), callback_data=f"sk:{x['id']}:{cat_}:{p}")],
+                 [B(text=t(lang, "write"), url=url)],
+                 [B(text=t(lang, "report"), callback_data=f"rp:{x['id']}")]]
+    nav = []
+    if p > 0:
+        nav.append(B(text="◀️", callback_data=f"p:{cat_}:{p - 1}"))
+    nav.append(B(text=f"{p + 1}/{n}", callback_data="noop"))
+    if p < n - 1:
+        nav.append(B(text="▶️", callback_data=f"p:{cat_}:{p + 1}"))
+    kb = KB(inline_keyboard=rows + [nav, [B(text="🏠", callback_data="menu")]])
+    await screen(c, "browse", text, kb)
     await c.answer()
 
 
@@ -397,40 +731,15 @@ async def page(c: CallbackQuery, lang):
             rows.append([B(text=t(lang, "check"), callback_data=f"p:{cat_}:{p}")])
             await screen(c, "sub", t(lang, "sub", ch=esc(ch)), KB(inline_keyboard=rows))
             return await c.answer()
-    cond, args = "l.status='active'", []
-    if cat_ != "all":
-        cond += " and l.category=$1"
-        args.append(cat_)
-    n = await db.fetchval(f"select count(*) from listings l where {cond}", *args)
-    if not n:
-        await screen(c, "empty", t(lang, "empty"), home_kb())
-        return await c.answer()
-    p = max(0, min(int(p), n - 1))
-    x = await db.fetchrow(
-        f"select l.*, u.username from listings l join users u on u.id=l.owner where {cond} "
-        f"order by l.updated desc, l.id offset {p} limit 1", *args)
-    text = f"{t(lang, 'c_' + x['category'])}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}"
-    await log_event(c.from_user.id, "view")
-    mine = x["owner"] == c.from_user.id
-    rows = []
-    if mine:
-        text += f"\n\n<i>{t(lang, 'yours')}</i>"
-    else:
-        if x["username"]:
-            url = f"https://t.me/{x['username']}"
-        else:
-            url = f"tg://user?id={x['owner']}"
-            text += f"\n\n<i>{t(lang, 'hint')}</i>"
-        rows += [[B(text=t(lang, "write"), url=url)], [B(text=t(lang, "report"), callback_data=f"rp:{x['id']}")]]
-    nav = []
-    if p > 0:
-        nav.append(B(text="◀️", callback_data=f"p:{cat_}:{p - 1}"))
-    nav.append(B(text=f"{p + 1}/{n}", callback_data="noop"))
-    if p < n - 1:
-        nav.append(B(text="▶️", callback_data=f"p:{cat_}:{p + 1}"))
-    kb = KB(inline_keyboard=rows + [nav, [B(text="🏠", callback_data="menu")]])
-    await screen(c, "browse", text, kb)
-    await c.answer()
+    await show_page(c, lang, cat_, int(p))
+
+
+@r.callback_query(F.data.startswith("sk:"))
+async def skip_listing(c: CallbackQuery, lang):
+    _, lid, cat_, p = c.data.split(":")
+    await db.execute("insert into skips(uid, listing_id) values($1,$2) on conflict do nothing",
+                     c.from_user.id, int(lid))
+    await show_page(c, lang, cat_, int(p))
 
 
 @r.callback_query(F.data.startswith("rp:"))
@@ -458,6 +767,8 @@ async def my(c: CallbackQuery, lang):
         await screen(c, "empty", t(lang, "empty"), home_kb())
     for x in rows:
         st = " " + t(lang, "hidden") if x["status"] == "hidden" else ""
+        if x["rules_hidden"]:
+            st += " " + t(lang, "rules_hidden")
         await c.message.answer(
             f"{t(lang, 'c_' + x['category'])}{st}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}\n🔗 {esc(x['link'])}",
             reply_markup=KB(inline_keyboard=[[B(text=t(lang, "renew"), callback_data=f"lr:{x['id']}"),
@@ -482,6 +793,139 @@ async def delete(c: CallbackQuery, lang):
     await c.answer(t(lang, "done"))
 
 
+# --- rules, rating and referral claims ---
+class Claim(StatesGroup):
+    proof = State()
+
+
+@r.callback_query(F.data == "rules:ok")
+async def rules_accept(c: CallbackQuery, lang):
+    await db.execute("update users set rules_ok=true where id=$1", c.from_user.id)
+    await cat(c, lang)
+
+
+@r.callback_query(F.data == "rules:view")
+async def rules_view(c: CallbackQuery, lang):
+    await screen(c, "rules", await rules_caption(lang), rules_kb(lang, accept=False))
+    await c.answer()
+
+
+@r.callback_query(F.data == "rt")
+async def rating_main(c: CallbackQuery, lang):
+    await screen(c, "rating", await rating_text(c.from_user.id, lang), rating_kb(lang))
+    await c.answer()
+
+
+@r.callback_query(F.data == "rt:what")
+async def rating_what(c: CallbackQuery, lang):
+    await screen(c, "rating", t(lang, "rt_what_text", pen=await setting("penalty_per_strike")), sub_kb(lang))
+    await c.answer()
+
+
+@r.callback_query(F.data == "rt:strikes")
+async def rating_strikes(c: CallbackQuery, lang):
+    await screen(c, "rating", t(lang, "rt_strikes_text", pen=await setting("penalty_per_strike")), sub_kb(lang))
+    await c.answer()
+
+
+@r.callback_query(F.data == "rt:top")
+async def rating_top(c: CallbackQuery, lang):
+    rows = await db.fetch("select username, score from users where score>0 and not banned order by score desc, id limit 10")
+    body = "\n".join(f"{i}. {('@' + esc(x['username'])) if x['username'] else '—'} · {x['score']}"
+                     for i, x in enumerate(rows, 1))
+    await screen(c, "rating", t(lang, "rt_top_title") + (body if rows else t(lang, "rt_top_empty")), sub_kb(lang))
+    await c.answer()
+
+
+@r.callback_query(F.data.startswith("cl:"))
+async def claim_start(c: CallbackQuery, lang, state: FSMContext):
+    lid = int(c.data[3:])
+    x = await db.fetchrow("select id, owner from listings where id=$1 and status='active' and not rules_hidden", lid)
+    if not x:
+        return await c.answer(t(lang, "claim_gone"), show_alert=True)
+    if x["owner"] == c.from_user.id:
+        return await c.answer()
+    reason = await claim_block_reason(c.from_user.id, x["owner"], lang)
+    if reason:
+        return await c.answer(reason, show_alert=True)
+    await state.set_state(Claim.proof)
+    await state.update_data(lid=lid)
+    await send_screen(c.bot, c.message.chat.id, "proof", t(lang, "claim_ask"), home_kb())
+    await c.answer()
+
+
+@r.message(Claim.proof, F.photo)
+async def claim_proof(m: Message, lang, state: FSMContext):
+    lid = (await state.get_data())["lid"]
+    await state.clear()
+    x = await db.fetchrow("select id, owner from listings where id=$1 and status='active' and not rules_hidden", lid)
+    if not x:
+        return await m.answer(t(lang, "claim_gone"))
+    reason = await claim_block_reason(m.from_user.id, x["owner"], lang)
+    if reason:
+        return await m.answer(reason)
+    cid = await db.fetchval(
+        "insert into claims(listing_id, giver, receiver, proof) values($1,$2,$3,$4) returning id",
+        lid, m.from_user.id, x["owner"], m.photo[-1].file_id)
+    await m.answer(t(lang, "claim_sent", d=await setting("claim_days")))
+    await send_claim_to_author(m.bot, cid)
+
+
+@r.message(Claim.proof)
+async def claim_proof_wrong(m: Message, lang):
+    await m.answer(t(lang, "claim_need_photo"))
+
+
+@r.callback_query(F.data.regexp(r"^c[fd]:\d+$"))
+async def claim_answer(c: CallbackQuery, lang):
+    cid = int(c.data[3:])
+    row = await db.fetchrow("select status, receiver, giver from claims where id=$1", cid)
+    if not row or row["receiver"] != c.from_user.id or row["status"] != "pending":
+        return await c.answer(t(lang, "claim_done"), show_alert=True)
+    if c.data.startswith("cf:"):
+        await apply_confirmed(c.bot, cid)
+        await c.answer(t(lang, "done"))
+    elif await dispute_limit_hit(c.from_user.id):
+        return await c.answer(t(lang, "dispute_limit"), show_alert=True)
+    else:
+        await db.execute("update claims set status='disputed', disputed_at=now() where id=$1 and status='pending'", cid)
+        await send_screen(c.bot, row["giver"], "dispute", t(await user_lang(row["giver"]), "claim_disputed"))
+        await notify_admins_dispute(c.bot, cid)
+        await c.answer(t(lang, "dispute_sent"), show_alert=True)
+    try:
+        await c.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+
+# --- support ---
+class Support(StatesGroup):
+    write = State()
+
+
+@r.callback_query(F.data == "sup")
+async def support_start(c: CallbackQuery, lang, state: FSMContext):
+    await state.set_state(Support.write)
+    await send_screen(c.bot, c.message.chat.id, "support", t(lang, "sup_ask"), home_kb())
+    await c.answer()
+
+
+@r.message(Support.write)
+async def support_msg(m: Message, lang, state: FSMContext):
+    await state.clear()
+    tid = await db.fetchval("insert into support_tickets(uid, mid) values($1,$2) returning id",
+                            m.from_user.id, m.message_id)
+    who = f"<code>{m.from_user.id}</code> @{esc(m.from_user.username or '—')}"
+    for a in ADMIN_IDS:
+        try:
+            await m.forward(a)
+            await m.bot.send_message(a, f"🆘 Звернення #{tid}\nВід: {who}",
+                                     reply_markup=KB(inline_keyboard=[[B(text="✍️ Відповісти", callback_data=f"sr:{tid}")]]))
+        except Exception:
+            logging.exception("could not forward support ticket to admin")
+    await send_screen(m.bot, m.chat.id, "support", t(lang, "sup_sent"), home_kb())
+
+
 # ---------- ADMIN ROUTER (ukrainian only) ----------
 ar = Router()
 ar.message.filter(F.from_user.id.in_(ADMIN_IDS))
@@ -489,12 +933,18 @@ ar.callback_query.filter(F.from_user.id.in_(ADMIN_IDS))
 
 SET_NAMES = {"ttl_days": "Термін життя анкети (дні)", "report_threshold": "Поріг скарг для приховування",
              "sub_required": "Обов'язкова підписка (1 - так, 0 - ні)", "sub_channel": "Канал (@username або ID)",
+             "claim_days": "Днів на відповідь автора (автозарахування)",
+             "open_claims_max": "Макс. відкритих заявок на користувача",
+             "pair_cooldown_days": "Пауза між парами (днів)",
+             "debt_limit": "Поріг боргу (анкета ховається)",
+             "penalty_per_strike": "Штраф за фейк (відпрацювань і рейтингу)",
+             "disputes_per_10": "Спорів на кожні 10 заявок до вас (5 = половина)",
              "welcome_ru": "Привітання RU", "welcome_uk": "Привітання UK", "welcome_en": "Привітання EN"}
 
 
 def admin_kb():
-    rows = [("📊 Статистика", "adm:stats"), ("⚠️ Скарги", "adm:rep"), ("⚙️ Налаштування", "adm:set"),
-            ("📣 Розсилка", "adm:bc")]
+    rows = [("📊 Статистика", "adm:stats"), ("⚖️ Спори", "adm:disp"), ("💬 Звернення", "adm:sup"), ("⚠️ Скарги", "adm:rep"),
+            ("⚙️ Налаштування", "adm:set"), ("📣 Розсилка", "adm:bc")]
     return KB(inline_keyboard=[[B(text=a, callback_data=b)] for a, b in rows])
 
 
@@ -529,8 +979,8 @@ async def unban(m, lang, command: CommandObject):
 
 # ---------- STATS (admin, sent as an image) ----------
 ST_BG, ST_PINK, ST_GREY, ST_WHITE = (17, 17, 17), (255, 42, 138), (150, 150, 150), (245, 245, 245)
-FONT_REG = ROOT_DIR / "fonts" / "DejaVuSans.ttf"
-FONT_BOLD = ROOT_DIR / "fonts" / "DejaVuSans-Bold.ttf"
+FONT_REG = ROOT_DIR / "DejaVuSans.ttf"
+FONT_BOLD = ROOT_DIR / "DejaVuSans-Bold.ttf"
 
 
 async def stats_data():
@@ -731,7 +1181,7 @@ async def setting_ask(c: CallbackQuery, state: FSMContext):
 async def setting_save(m, lang, state: FSMContext):
     k = (await state.get_data())["key"]
     v = "" if m.text.strip() == "-" else m.text.strip()
-    if k in ("ttl_days", "report_threshold") and not v.isdigit():
+    if k in NUM_KEYS and not v.isdigit():
         return await m.answer("Потрібне число.")
     if k == "sub_required" and v not in ("0", "1"):
         return await m.answer("Надішліть 0 або 1.")
@@ -774,6 +1224,85 @@ async def bc_go(c: CallbackQuery, state: FSMContext):
     await c.message.answer(f"Надіслано: {ok} з {len(ids)}", reply_markup=admin_kb())
 
 
+# --- moderation: disputes, user lookup ---
+async def next_dispute(target):
+    x = await db.fetchrow("select id from claims where status='disputed' order by disputed_at limit 1")
+    if not x:
+        return await target.answer("Спорів немає ✅", reply_markup=admin_kb())
+    card = await claim_card(x["id"])
+    await target.answer_photo(card["proof"], caption=dispute_caption(card), reply_markup=dispute_kb(card["id"]))
+
+
+@ar.callback_query(F.data == "adm:disp")
+async def disp_queue(c: CallbackQuery):
+    await next_dispute(c.message)
+    await c.answer()
+
+
+@ar.callback_query(F.data.regexp(r"^dv:\d+:(ok|fake)$"))
+async def dispute_decide(c: CallbackQuery):
+    _, cid, act = c.data.split(":")
+    ok = await (apply_confirmed(c.bot, int(cid)) if act == "ok" else reject_claim(c.bot, int(cid)))
+    await c.answer("Готово" if ok else "Вже розглянуто")
+    await next_dispute(c.message)
+
+
+@ar.message(Command("user"))
+async def user_info(m: Message, lang, command: CommandObject):
+    if not (command.args or "").strip().isdigit():
+        return await m.answer("Використання: /user ID")
+    uid = int(command.args)
+    u = await db.fetchrow("select * from users where id=$1", uid)
+    if not u:
+        return await m.answer("Користувача не знайдено.")
+    n = await db.fetchval("select count(*) from listings where owner=$1", uid)
+    await m.answer(
+        f"👤 <code>{uid}</code> @{esc(u['username'] or '—')}\n"
+        f"Рейтинг: {u['score']} · страйки: {u['strikes']}\n"
+        f"Зробив: {u['given']} · отримав: {u['received']} · борг: {max(0, u['received'] - u['given'])}\n"
+        f"Штраф (відпрацювань): {u['penalty_due']} · анкет: {n}\n"
+        f"Правила прийнято: {'так' if u['rules_ok'] else 'ні'} · бан: {'так' if u['banned'] else 'ні'}")
+
+
+# --- support replies ---
+async def next_ticket(target):
+    x = await db.fetchrow("select id, uid, mid from support_tickets where status='open' order by id limit 1")
+    if not x:
+        return await target.answer("Звернень немає ✅", reply_markup=admin_kb())
+    username = await db.fetchval("select username from users where id=$1", x["uid"])
+    await target.bot.forward_message(target.chat.id, x["uid"], x["mid"])
+    await target.answer(f"🆘 Звернення #{x['id']}\nВід: <code>{x['uid']}</code> @{esc(username or '—')}",
+                        reply_markup=KB(inline_keyboard=[[B(text="✍️ Відповісти", callback_data=f"sr:{x['id']}")]]))
+
+
+@ar.callback_query(F.data == "adm:sup")
+async def sup_queue(c: CallbackQuery):
+    await next_ticket(c.message)
+    await c.answer()
+
+
+@ar.callback_query(F.data.regexp(r"^sr:\d+$"))
+async def sup_reply_ask(c: CallbackQuery, state: FSMContext):
+    await state.set_state(Adm.reply)
+    await state.update_data(tid=int(c.data[3:]))
+    await c.message.answer("Напишіть відповідь одним повідомленням (текст). /cancel — скасувати.")
+    await c.answer()
+
+
+@ar.message(Adm.reply, F.text)
+async def sup_reply_send(m: Message, state: FSMContext):
+    tid = (await state.get_data())["tid"]
+    await state.clear()
+    x = await db.fetchrow("update support_tickets set status='closed' where id=$1 and status='open' returning uid", tid)
+    if not x:
+        return await m.answer("Звернення вже закрите.", reply_markup=admin_kb())
+    try:
+        await m.bot.send_message(x["uid"], t(await user_lang(x["uid"]), "sup_reply", text=esc(m.text)))
+    except Exception:
+        return await m.answer("Не вдалося надіслати: можливо, користувач заблокував бота.", reply_markup=admin_kb())
+    await m.answer(f"Надіслано ✅ (звернення #{tid} закрито)", reply_markup=admin_kb())
+
+
 # ---------- CLEANUP ----------
 async def cleanup_loop(bot: Bot):
     while True:
@@ -793,6 +1322,7 @@ async def cleanup_loop(bot: Bot):
             await db.execute("delete from listings where updated < now() - make_interval(days => $1)", ttl)
         except Exception:
             logging.exception("cleanup failed")
+        await claims_expiry(bot)
         await asyncio.sleep(3600)
 
 
