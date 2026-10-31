@@ -64,6 +64,7 @@ T = {
     "renew": ("🔄 Продлить", "🔄 Продовжити", "🔄 Renew"),
     "delete": ("🗑 Удалить", "🗑 Видалити", "🗑 Delete"),
     "done": ("Готово", "Готово", "Done"),
+    "yours": ("Это ваша анкета", "Це ваша анкета", "This is your listing"),
     "hidden": ("(скрыта)", "(прихована)", "(hidden)"),
     "expiring": ("Анкета «{t}» скоро исчезнет. Продлить?", "Анкета «{t}» скоро зникне. Продовжити?",
                  "Listing “{t}” will expire soon. Renew?"),
@@ -120,8 +121,9 @@ def lang_kb():
 
 
 def menu_kb(lang):
-    return KB(inline_keyboard=[[B(text=t(lang, k), callback_data=cb)] for k, cb in
-                               (("b_new", "new"), ("b_cat", "cat"), ("b_my", "my"), ("b_lang", "lang"))])
+    def b(k, cb):
+        return B(text=t(lang, k), callback_data=cb)
+    return KB(inline_keyboard=[[b("b_cat", "cat")], [b("b_new", "new"), b("b_my", "my")], [b("b_lang", "lang")]])
 
 
 # ---------- MIDDLEWARE ----------
@@ -202,7 +204,10 @@ async def cancel(m, lang, state: FSMContext):
 @r.callback_query(F.data == "menu")
 async def menu(c: CallbackQuery, lang, state: FSMContext):
     await state.clear()
-    await send_menu(c.message, lang)
+    try:
+        await c.message.edit_text(t(lang, "menu"), reply_markup=menu_kb(lang))
+    except Exception:
+        await send_menu(c.message, lang)
     await c.answer()
 
 
@@ -280,9 +285,9 @@ async def cat(c: CallbackQuery, lang):
 @r.callback_query(F.data.startswith("p:"))
 async def page(c: CallbackQuery, lang):
     _, cat_, p = c.data.split(":")
-    cond, args = "l.status='active' and l.owner<>$1", [c.from_user.id]
+    cond, args = "l.status='active'", []
     if cat_ != "all":
-        cond += " and l.category=$2"
+        cond += " and l.category=$1"
         args.append(cat_)
     n = await db.fetchval(f"select count(*) from listings l where {cond}", *args)
     if not n:
@@ -292,21 +297,25 @@ async def page(c: CallbackQuery, lang):
     x = await db.fetchrow(
         f"select l.*, u.username from listings l join users u on u.id=l.owner where {cond} "
         f"order by l.updated desc, l.id offset {p} limit 1", *args)
-    text = (f"{t(lang, 'c_' + x['category'])}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}\n\n🔗 {esc(x['link'])}")
-    if x["username"]:
-        url = f"https://t.me/{x['username']}"
+    text = f"{t(lang, 'c_' + x['category'])}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}"
+    mine = x["owner"] == c.from_user.id
+    rows = []
+    if mine:
+        text += f"\n\n<i>{t(lang, 'yours')}</i>"
     else:
-        url = f"tg://user?id={x['owner']}"
-        text += f"\n\n<i>{t(lang, 'hint')}</i>"
+        if x["username"]:
+            url = f"https://t.me/{x['username']}"
+        else:
+            url = f"tg://user?id={x['owner']}"
+            text += f"\n\n<i>{t(lang, 'hint')}</i>"
+        rows += [[B(text=t(lang, "write"), url=url)], [B(text=t(lang, "report"), callback_data=f"rp:{x['id']}")]]
     nav = []
     if p > 0:
         nav.append(B(text="◀️", callback_data=f"p:{cat_}:{p - 1}"))
     nav.append(B(text=f"{p + 1}/{n}", callback_data="noop"))
     if p < n - 1:
         nav.append(B(text="▶️", callback_data=f"p:{cat_}:{p + 1}"))
-    kb = KB(inline_keyboard=[[B(text=t(lang, "write"), url=url)],
-                             [B(text=t(lang, "report"), callback_data=f"rp:{x['id']}")], nav,
-                             [B(text="🏠", callback_data="menu")]])
+    kb = KB(inline_keyboard=rows + [nav, [B(text="🏠", callback_data="menu")]])
     try:
         await c.message.edit_text(text, reply_markup=kb)
     except Exception:
