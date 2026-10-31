@@ -1,5 +1,6 @@
 import asyncio, hashlib, html, logging, os, re
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import asyncpg
@@ -73,6 +74,12 @@ T = {
             "Щоб переглядати наступні анкети, підпішіться на канал {ch}",
             "To see more listings, subscribe to the channel: {ch}"),
     "b_sub": ("📢 Подписаться", "📢 Підписатися", "📢 Subscribe"),
+    "cat_head": ("🔎 <b>Каталог</b>\n───────────\nЧто ищем сегодня?",
+                 "🔎 <b>Каталог</b>\n───────────\nЩо шукаємо сьогодні?",
+                 "🔎 <b>Catalog</b>\n───────────\nWhat are we looking for today?"),
+    "new_head": ("➕ <b>Новая анкета</b>\n───────────\nШаг 1 из 4: выберите категорию",
+                 "➕ <b>Нова анкета</b>\n───────────\nКрок 1 з 4: оберіть категорію",
+                 "➕ <b>New listing</b>\n───────────\nStep 1 of 4: choose a category"),
     "check": ("✅ Я подписался", "✅ Я підписався", "✅ I subscribed"),
     "hint": ("Если кнопка не открывается — автор скрыл профиль.", "Якщо кнопка не відкривається — автор сховав профіль.",
              "If the button doesn't open, the author hid their profile."),
@@ -124,12 +131,38 @@ create table if not exists listings(id serial primary key, owner bigint not null
 create table if not exists reports(listing_id int not null references listings(id) on delete cascade,
   reporter bigint not null, created timestamptz not null default now(), primary key(listing_id, reporter));
 create table if not exists settings(key text primary key, value text not null);
+alter table users add column if not exists last_seen timestamptz;
+create table if not exists events(id bigserial primary key, uid bigint not null, kind text not null,
+  created timestamptz not null default now());
+create index if not exists events_created on events(created);
 """
 
 
 async def ban_user(uid):
     await db.execute("insert into users(id, banned) values($1, true) on conflict(id) do update set banned=true", uid)
     await db.execute("delete from listings where owner=$1", uid)
+
+
+async def log_event(uid, kind):
+    await db.execute("insert into events(uid, kind) values($1, $2)", uid, kind)
+
+
+async def cat_counts():
+    rows = await db.fetch("select category, count(*) n from listings where status='active' group by category")
+    return {x["category"]: x["n"] for x in rows}
+
+
+def cat_kb(lang, cb, counts=None):
+    """Category picker. cb(key) returns callback data. counts (catalog only) adds listing counts and an 'all' row."""
+    def btn(k):
+        label = t(lang, "c_" + k)
+        if counts is not None:
+            n = sum(counts.values()) if k == "all" else counts.get(k, 0)
+            label += f" · {n}"
+        return B(text=label, callback_data=cb(k))
+    rows = [[btn("all")]] if counts is not None else []
+    rows += [[btn("bot"), btn("channel")], [btn("other")], [B(text="🏠", callback_data="menu")]]
+    return KB(inline_keyboard=rows)
 
 
 # ---------- KEYBOARDS ----------
@@ -146,14 +179,23 @@ def menu_kb(lang):
 
 
 # ---------- ILLUSTRATIONS ----------
-IMG_DIR = Path(__file__).parent / "img"
+ROOT_DIR = Path(__file__).parent
+IMG_DIRS = [ROOT_DIR / "img", ROOT_DIR]  # works whether images are in img/ or next to main.py
 _file_ids = {}
+
+
+def find_img(name):
+    for d in IMG_DIRS:
+        p = d / f"{name}.png"
+        if p.exists():
+            return p
+    return None
 
 
 async def send_screen(bot, chat_id, name, text, kb=None):
     """Sends a message with an illustration on top (img/<name>.png). Falls back to plain text."""
-    path = IMG_DIR / f"{name}.png"
-    if path.exists() and len(text) <= 1024:
+    path = find_img(name)
+    if path and len(text) <= 1024:
         fid = _file_ids.get(name)
         try:
             msg = await bot.send_photo(chat_id, fid or FSInputFile(path), caption=text, reply_markup=kb)
@@ -190,8 +232,8 @@ class Mw(BaseMiddleware):
         guess = (u.language_code or "")[:2]
         guess = guess if guess in LANGS else None
         row = await db.fetchrow(
-            """insert into users(id,lang,username) values($1,$2,$3)
-               on conflict(id) do update set username=excluded.username returning lang, banned""",
+            """insert into users(id,lang,username,last_seen) values($1,$2,$3,now())
+               on conflict(id) do update set username=excluded.username, last_seen=now() returning lang, banned""",
             u.id, guess, u.username)
         if row["banned"]:
             return
@@ -271,8 +313,7 @@ async def lang_set(c: CallbackQuery):
 @r.callback_query(F.data == "new")
 async def new(c: CallbackQuery, lang, state: FSMContext):
     await state.clear()
-    rows = [[B(text=t(lang, "c_" + k), callback_data="nc:" + k)] for k in ("bot", "channel", "other")]
-    await screen(c, "new", t(lang, "q_cat"), KB(inline_keyboard=rows))
+    await screen(c, "new", t(lang, "new_head"), cat_kb(lang, lambda k: "nc:" + k))
     await c.answer()
 
 
@@ -306,6 +347,7 @@ async def new_link(m, lang, state: FSMContext):
     d = await state.get_data()
     await db.execute("insert into listings(owner,category,title,descr,link) values($1,$2,$3,$4,$5)",
                      m.from_user.id, d["cat"], d["title"], d["desc"], link)
+    await log_event(m.from_user.id, "create")
     await state.clear()
     await send_menu(m, lang, t(lang, "saved"), "saved")
 
@@ -313,8 +355,8 @@ async def new_link(m, lang, state: FSMContext):
 # --- catalog ---
 @r.callback_query(F.data == "cat")
 async def cat(c: CallbackQuery, lang):
-    rows = [[B(text=t(lang, "c_" + k), callback_data=f"p:{k}:0")] for k in ("all", "bot", "channel", "other")]
-    await screen(c, "catalog", t(lang, "q_cat"), KB(inline_keyboard=rows))
+    counts = await cat_counts()
+    await screen(c, "catalog", t(lang, "cat_head"), cat_kb(lang, lambda k: f"p:{k}:0", counts))
     await c.answer()
 
 
@@ -343,6 +385,7 @@ async def page(c: CallbackQuery, lang):
         f"select l.*, u.username from listings l join users u on u.id=l.owner where {cond} "
         f"order by l.updated desc, l.id offset {p} limit 1", *args)
     text = f"{t(lang, 'c_' + x['category'])}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}"
+    await log_event(c.from_user.id, "view")
     mine = x["owner"] == c.from_user.id
     rows = []
     if mine:
@@ -376,6 +419,7 @@ async def page(c: CallbackQuery, lang):
 async def report(c: CallbackQuery, lang):
     lid = int(c.data[3:])
     await db.execute("insert into reports(listing_id,reporter) values($1,$2) on conflict do nothing", lid, c.from_user.id)
+    await log_event(c.from_user.id, "report")
     cnt = await db.fetchval("select count(*) from reports where listing_id=$1", lid)
     if cnt >= int(await setting("report_threshold")):
         hid = await db.fetchval("update listings set status='hidden' where id=$1 and status='active' returning id", lid)
@@ -466,15 +510,53 @@ async def unban(m, lang, command: CommandObject):
 
 
 @ar.callback_query(F.data == "adm:stats")
-async def stats(c: CallbackQuery, lang):
-    v = await db.fetchrow("""select
-      (select count(*) from users) u, (select count(*) from users where created>now()-interval '1 day') u1,
-      (select count(*) from users where banned) ub,
-      (select count(*) from listings where status='active') la, (select count(*) from listings where status='hidden') lh,
-      (select count(*) from listings where created>now()-interval '1 day') l1""")
-    await c.message.answer(f"👥 Користувачів: {v['u']} (за добу +{v['u1']}, забанено {v['ub']})\n"
-                           f"📋 Активних анкет: {v['la']} (за добу +{v['l1']})\n⚠️ Прихованих: {v['lh']}",
-                           reply_markup=admin_kb())
+async def stats(c: CallbackQuery):
+    u = await db.fetchrow("""select count(*) total,
+      count(*) filter (where banned) banned,
+      count(*) filter (where created > now()-interval '1 day') n1,
+      count(*) filter (where created > now()-interval '7 days') n7,
+      count(*) filter (where created > now()-interval '30 days') n30,
+      count(*) filter (where last_seen > now()-interval '1 day') a1,
+      count(*) filter (where last_seen > now()-interval '7 days') a7
+      from users""")
+    l = await db.fetchrow("""select count(*) filter (where status='active') active,
+      count(*) filter (where status='hidden') hidden,
+      count(*) filter (where created > now()-interval '1 day') n1,
+      count(*) filter (where created > now()-interval '7 days') n7
+      from listings""")
+    cats = await cat_counts()
+    e = await db.fetchrow("""select
+      count(*) filter (where kind='view' and created > now()-interval '1 day') v1,
+      count(*) filter (where kind='view' and created > now()-interval '7 days') v7,
+      count(*) filter (where kind='view') vall,
+      count(distinct uid) filter (where kind='view' and created > now()-interval '7 days') vu7,
+      count(*) filter (where kind='report' and created > now()-interval '7 days') r7
+      from events""")
+    days = await db.fetch("""select date_trunc('day', created) d, count(*) n from users
+      where created > now()-interval '7 days' group by d""")
+    today = datetime.now(timezone.utc).date()
+    by_day = {x["d"].date(): x["n"] for x in days}
+    vals = [by_day.get(today - timedelta(days=i), 0) for i in range(6, -1, -1)]
+    mx = max(vals) or 1
+    spark = "".join("▁▂▃▄▅▆▇█"[round(v / mx * 7)] for v in vals)
+    text = (
+        "📊 <b>Статистика</b>\n\n"
+        "👥 <b>Користувачі</b>\n"
+        f"Всього: {u['total']} · забанено: {u['banned']}\n"
+        f"Нових: за добу +{u['n1']}, за тиждень +{u['n7']}, за місяць +{u['n30']}\n"
+        f"Були в боті: за добу {u['a1']}, за тиждень {u['a7']}\n"
+        f"Нові по днях (7 днів): {spark}\n\n"
+        "📋 <b>Анкети</b>\n"
+        f"Активних: {l['active']} · прихованих: {l['hidden']}\n"
+        f"Нових: за добу +{l['n1']}, за тиждень +{l['n7']}\n"
+        f"🤖 Боти: {cats.get('bot', 0)} · 📢 Канали: {cats.get('channel', 0)} · 📦 Інше: {cats.get('other', 0)}\n\n"
+        "👁 <b>Каталог</b>\n"
+        f"Переглядів: за добу {e['v1']}, за тиждень {e['v7']}, всього {e['vall']}\n"
+        f"Унікальних глядачів за тиждень: {e['vu7']}\n\n"
+        "⚠️ <b>Скарги</b>\n"
+        f"За тиждень: {e['r7']}"
+    )
+    await c.message.answer(text, reply_markup=admin_kb())
     await c.answer()
 
 
