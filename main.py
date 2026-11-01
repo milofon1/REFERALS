@@ -112,12 +112,12 @@ T = {
                   "Send a screenshot of your sign-up through this link (photo). Without proof the claim is not created."),
     "claim_need_photo": ("Нужен скриншот. Пришлите фото или /cancel.", "Потрібен скриншот. Надішліть фото або /cancel.",
                          "A screenshot is needed. Send a photo or /cancel."),
-    "claim_sent": ("✅ Заявка отправлена автору. Если он не ответит за {d} дн., реферал засчитается автоматически.",
-                   "✅ Заявку надіслано автору. Якщо він не відповість за {d} дн., реферал зарахується автоматично.",
-                   "✅ Claim sent to the author. If there is no answer in {d} days, it counts automatically."),
-    "claim_author": ("🔔 Кто-то утверждает, что сделал реферал на вашу анкету «{t}». Проверьте доказательство выше и подтвердите. Без ответа за {d} дн. засчитаем автоматически.",
-                     "🔔 Хтось стверджує, що зробив реферал на вашу анкету «{t}». Перевірте доказ вище і підтвердіть. Без відповіді за {d} дн. зарахуємо автоматично.",
-                     "🔔 Someone says they made a referral on your listing “{t}”. Check the proof above and confirm. No answer in {d} days and it counts automatically."),
+    "claim_sent": ("✅ Заявка отправлена автору. Если он не ответит за {d} ч., реферал засчитается автоматически.",
+                   "✅ Заявку надіслано автору. Якщо він не відповість за {d} год., реферал зарахується автоматично.",
+                   "✅ Claim sent to the author. If there is no answer in {d} hours, it counts automatically."),
+    "claim_author": ("🔔 Кто-то утверждает, что сделал реферал на вашу анкету «{t}». Проверьте доказательство выше и подтвердите. Без ответа за {d} ч. засчитаем автоматически.",
+                     "🔔 Хтось стверджує, що зробив реферал на вашу анкету «{t}». Перевірте доказ вище і підтвердіть. Без відповіді за {d} год. зарахуємо автоматично.",
+                     "🔔 Someone says they made a referral on your listing “{t}”. Check the proof above and confirm. No answer in {d} hours and it counts automatically."),
     "claim_ok": ("✅ Реферал засчитан. Рейтинг и баланс обновлены.", "✅ Реферал зараховано. Рейтинг і баланс оновлено.",
                  "✅ Referral counted. Rating and balance updated."),
     "claim_fake": ("⚠️ Заявка признана фейковой: страйк +1, штраф {n} отработок, рейтинг −{n}. Отработки — подтверждённые рефералы для других. После них анкета снова видна.",
@@ -145,9 +145,9 @@ T = {
                      "🔒 Your listings are hidden from the catalog: {p} make-ups owed. Make confirmed referrals for others and they come back automatically."),
     "unlock": ("✅ Ваши анкеты снова видны в каталоге.", "✅ Ваші анкети знову видно в каталозі.",
                "✅ Your listings are visible in the catalog again."),
-    "claim_remind": ("⏰ Завтра заявка на «{t}» засчитается автоматически. Проверьте её и подтвердите или отклоните.",
-                     "⏰ Завтра заявка на «{t}» зарахується автоматично. Перевірте її і підтвердіть або відхиліть.",
-                     "⏰ Tomorrow the claim on “{t}” counts automatically. Check it and confirm or decline."),
+    "claim_remind": ("⏰ Через 2 часа заявка на «{t}» засчитается автоматически. Проверьте её и подтвердите или отклоните.",
+                     "⏰ Через 2 години заявка на «{t}» зарахується автоматично. Перевірте її і підтвердіть або відхиліть.",
+                     "⏰ In 2 hours the claim on “{t}” counts automatically. Check it and confirm or decline."),
     "dispute_limit": ("Лимит споров исчерпан. Подтвердите заявку или дождитесь автозачёта.",
                       "Ліміт спорів вичерпано. Підтвердіть заявку або дочекайтесь автозарахування.",
                       "Dispute limit reached. Confirm the claim or wait for the automatic count."),
@@ -164,21 +164,21 @@ T = {
     "rules_text": ("⚖️ <b>Правила взаимных рефералов</b>\n\n"
                    "1. Реферал — это реальная регистрация по ссылке автора. Фейки запрещены.\n"
                    "2. Заявка без скриншота не создаётся. Доказательство видят автор и администратор.\n"
-                   "3. У автора {days} дн. на ответ. Без ответа реферал засчитывается автоматически.\n"
+                   "3. У автора {hours} ч. на ответ. Без ответа реферал засчитывается автоматически.\n"
                    "4. Фейк, подтверждённый администратором: −{pen} к рейтингу, страйк и {pen} отработок. Пока штраф не отработан, анкета скрыта.\n"
                    "5. Разница между полученными и сделанными рефералами не больше {debt}. Иначе анкета скрыта, пока не выровняете.\n\n"
                    "Нажимая «Согласен», вы принимаете эти правила.",
                    "⚖️ <b>Правила взаємних рефералів</b>\n\n"
                    "1. Реферал — це реальна реєстрація за посиланням автора. Фейки заборонені.\n"
                    "2. Заявка без скриншота не створюється. Доказ бачать автор і адміністратор.\n"
-                   "3. У автора {days} дн. на відповідь. Без відповіді реферал зараховується автоматично.\n"
+                   "3. У автора {hours} год. на відповідь. Без відповіді реферал зараховується автоматично.\n"
                    "4. Фейк, підтверджений адміністратором: −{pen} до рейтингу, страйк і {pen} відпрацювань. Поки штраф не відпрацьовано, анкета прихована.\n"
                    "5. Різниця між отриманими і зробленими рефералами не більша за {debt}. Інакше анкета прихована, доки не вирівняєте.\n\n"
                    "Натискаючи «Погоджуюсь», ви приймаєте ці правила.",
                    "⚖️ <b>Mutual referral rules</b>\n\n"
                    "1. A referral is a real sign-up through the author's link. Fakes are not allowed.\n"
                    "2. A claim without a screenshot is not created. The author and an admin see the proof.\n"
-                   "3. The author has {days} days to answer. No answer and the referral counts automatically.\n"
+                   "3. The author has {hours} hours to answer. No answer and the referral counts automatically.\n"
                    "4. A fake confirmed by an admin: −{pen} rating, a strike and {pen} make-ups. Until the penalty is worked off, your listing is hidden.\n"
                    "5. The gap between received and given referrals must not exceed {debt}. Otherwise your listing is hidden until you balance it.\n\n"
                    "By tapping “I agree” you accept these rules."),
@@ -212,9 +212,9 @@ def t(lang, key, **kw):
 
 DEFAULTS = {"ttl_days": "30", "report_threshold": "3", "sub_required": "0", "sub_channel": "",
             "welcome_ru": "", "welcome_uk": "", "welcome_en": "",
-            "claim_days": "3", "open_claims_max": "3", "pair_cooldown_days": "30",
+            "claim_hours": "12", "open_claims_max": "3", "pair_cooldown_days": "30",
             "debt_limit": "2", "penalty_per_strike": "3", "disputes_per_10": "5"}
-NUM_KEYS = ("ttl_days", "report_threshold", "claim_days", "open_claims_max",
+NUM_KEYS = ("ttl_days", "report_threshold", "claim_hours", "open_claims_max",
             "pair_cooldown_days", "debt_limit", "penalty_per_strike", "disputes_per_10")
 
 
@@ -405,7 +405,7 @@ async def send_claim_to_author(bot, cid):
                               B(text=t(lang, "no_btn"), callback_data=f"cd:{cid}")]])
     try:
         await bot.send_photo(card["receiver"], card["proof"],
-                             caption=t(lang, "claim_author", t=esc(card["title"]), d=await setting("claim_days")),
+                             caption=t(lang, "claim_author", t=esc(card["title"]), d=await setting("claim_hours")),
                              reply_markup=kb)
     except Exception:
         logging.exception("could not send the claim to the author")
@@ -431,15 +431,16 @@ async def notify_admins_dispute(bot, cid):
 
 
 async def claims_expiry(bot):
-    """Reminds the author a day before, auto-counts unanswered claims, closes disputes nobody decided within 7 days."""
+    """Reminds the author two hours before the deadline, auto-counts unanswered claims,
+    closes disputes nobody decided within 7 days. Runs hourly, so auto-counting can be up to an hour late."""
     try:
-        days = int(await setting("claim_days"))
-        if days > 1:
+        hours = int(await setting("claim_hours"))
+        if hours > 2:
             for x in await db.fetch("""select c.id, c.receiver, l.title from claims c join listings l on l.id=c.listing_id
-                    where c.status='pending' and not c.reminded and c.created < now() - make_interval(days => $1)""", days - 1):
+                    where c.status='pending' and not c.reminded and c.created < now() - make_interval(hours => $1)""", hours - 2):
                 await db.execute("update claims set reminded=true where id=$1", x["id"])
                 await notify(bot, x["receiver"], "claim_remind", t=esc(x["title"]))
-        for x in await db.fetch("select id from claims where status='pending' and created < now() - make_interval(days => $1)", days):
+        for x in await db.fetch("select id from claims where status='pending' and created < now() - make_interval(hours => $1)", hours):
             await apply_confirmed(bot, x["id"])
         await db.execute("""update claims set status='expired', decided=now()
             where status='disputed' and disputed_at < now() - interval '7 days'""")
@@ -448,7 +449,7 @@ async def claims_expiry(bot):
 
 
 async def rules_caption(lang):
-    return t(lang, "rules_text", days=await setting("claim_days"), pen=await setting("penalty_per_strike"),
+    return t(lang, "rules_text", hours=await setting("claim_hours"), pen=await setting("penalty_per_strike"),
              debt=await setting("debt_limit"))
 
 
@@ -965,7 +966,7 @@ async def claim_proof(m: Message, lang, state: FSMContext):
     cid = await db.fetchval(
         "insert into claims(listing_id, giver, receiver, proof) values($1,$2,$3,$4) returning id",
         lid, m.from_user.id, x["owner"], m.photo[-1].file_id)
-    await m.answer(t(lang, "claim_sent", d=await setting("claim_days")))
+    await m.answer(t(lang, "claim_sent", d=await setting("claim_hours")))
     await send_claim_to_author(m.bot, cid)
 
 
@@ -1031,7 +1032,7 @@ ar.callback_query.filter(F.from_user.id.in_(ADMIN_IDS))
 
 SET_NAMES = {"ttl_days": "Термін життя анкети (дні)", "report_threshold": "Поріг скарг для приховування",
              "sub_required": "Обов'язкова підписка (1 - так, 0 - ні)", "sub_channel": "Канал (@username або ID)",
-             "claim_days": "Днів на відповідь автора (автозарахування)",
+             "claim_hours": "Годин на відповідь автора (автозарахування)",
              "open_claims_max": "Макс. відкритих заявок на користувача",
              "pair_cooldown_days": "Пауза між парами (днів)",
              "debt_limit": "Поріг боргу (анкета ховається)",
