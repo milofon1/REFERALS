@@ -982,6 +982,39 @@ async def rating_top(c: CallbackQuery, lang):
     await c.answer()
 
 
+class Reason(StatesGroup):
+    text = State()
+
+
+class Support(StatesGroup):
+    write = State()
+
+
+async def forward_proof(bot, to_uid, from_uid, mid, fid):
+    """Forwards the executor's screenshot, so the author sees who sent it. Falls back to a plain copy."""
+    try:
+        if mid is None:
+            raise ValueError("no message id")
+        await bot.forward_message(to_uid, from_uid, mid)
+    except Exception:
+        await bot.send_photo(to_uid, fid)
+
+
+async def claim_create(m: Message, lang, lid, proof, mid, before=None, mid_before=None):
+    x = await db.fetchrow("select owner from listings where id=$1 and status='active' and not rules_hidden", lid)
+    if not x:
+        return await m.answer(t(lang, "claim_gone"))
+    reason = await claim_block_reason(m.from_user.id, x["owner"], lang)
+    if reason:
+        return await m.answer(reason)
+    cid = await db.fetchval(
+        """insert into claims(listing_id, giver, receiver, proof, mid, proof_before, mid_before)
+           values($1,$2,$3,$4,$5,$6,$7) returning id""",
+        lid, m.from_user.id, x["owner"], proof, mid, before, mid_before)
+    await m.answer(t(lang, "claim_sent", d=await setting("claim_hours")))
+    await send_claim_to_author(m.bot, cid)
+
+
 @r.callback_query(F.data.startswith("cl:"))
 async def claim_start(c: CallbackQuery, lang, state: FSMContext):
     lid = int(c.data[3:])
