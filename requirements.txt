@@ -1,4 +1,4 @@
-aiogram>=3.7,<4
-aiohttp>=3.9,<4
-asyncpg>=0.29,<1
-pillow>=10,<14
+aiogram==3.31.0
+aiohttp==3.14.5
+asyncpg==0.32.0
+pillow==13.0.0

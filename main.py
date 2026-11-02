@@ -12,7 +12,7 @@ from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.base import BaseStorage
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import (BufferedInputFile, CallbackQuery, FSInputFile, InlineKeyboardButton as B,
                            InlineKeyboardMarkup as KB, InputMediaPhoto, Message)
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -26,6 +26,8 @@ ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split("
 BASE_URL = (os.getenv("BASE_URL") or os.getenv("RENDER_EXTERNAL_URL", "")).rstrip("/")
 PORT = int(os.getenv("PORT", "10000"))
 SECRET = hashlib.sha256(TOKEN.encode()).hexdigest()[:32]
+INSTANCE = os.urandom(6).hex()  # tells two Render instances apart during a deploy
+SUP_LIMIT, SUP_WINDOW_MIN = 5, 10  # support: at most 5 user messages per 10 minutes
 
 
 def clean_dsn(url):
@@ -98,9 +100,9 @@ T = {
     "claim_after_ask": ("Шаг 2 из 2. Пришлите скриншот ПОСЛЕ выполнения: регистрация или результат.",
                         "Крок 2 з 2. Надішліть скриншот ПІСЛЯ виконання: реєстрація або результат.",
                         "Step 2 of 2. Send a screenshot AFTER completing: the sign-up or the result."),
-    "reason_ask": ("Укажите причину отказа одним сообщением: что именно не выполнено. Без причины отказ не отправится.",
-                   "Вкажіть причину відмови одним повідомленням: що саме не виконано. Без причини відмова не надішлеться.",
-                   "Give the reason for declining in one message: what was not done. Without a reason the decline is not sent."),
+    "reason_ask": ("Укажите причину отказа одним сообщением: что именно не выполнено. Без причины отказ не отправится.\n\nПередумали — нажмите «Отменить»: заявка останется на проверке, кнопки под ней сохранятся.",
+                   "Вкажіть причину відмови одним повідомленням: що саме не виконано. Без причини відмова не надішлеться.\n\nПередумали — натисніть «Відмінити»: заявка залишиться на перевірці, кнопки під нею збережуться.",
+                   "Give the reason for declining in one message: what was not done. Without a reason the decline is not sent.\n\nChanged your mind? Tap “Cancel”: the claim stays open and its buttons remain."),
     "b_pm": ("🖼 Скринов: {n}", "🖼 Скрінів: {n}", "🖼 Screenshots: {n}"),
     "pm_set": ("Теперь нужно скриншотов: {n}", "Тепер потрібно скрінів: {n}", "Now screenshots required: {n}"),
     "b_price": ("💰 Оплата: {n} 🪙", "💰 Оплата: {n} 🪙", "💰 Pay: {n} 🪙"),
@@ -199,8 +201,8 @@ T = {
     "n_low": ("🪙 Осталась {f} свободная монета. Когда она уйдёт в резерв, анкеты встанут на паузу.",
               "🪙 Залишилась {f} вільна монета. Коли вона піде в резерв, анкети стануть на паузу.",
               "🪙 {f} available coin left. Once it is reserved, your listings will pause."),
-    "n_invite": ("🤝 Ваш друг выполнил первое задание: +{n} 🪙.", "🤝 Ваш друг виконав перше завдання: +{n} 🪙.",
-                 "🤝 Your friend completed their first task: +{n} 🪙."),
+    "n_invite": ("🤝 Ваш друг выполнил задания разных авторов: +{n} 🪙.", "🤝 Ваш друг виконав завдання різних авторів: +{n} 🪙.",
+                 "🤝 Your friend completed tasks for different authors: +{n} 🪙."),
     "n_admin_add": ("🎁 Администрация начислила вам +{n} 🪙.{note}\nСвободно: {f} 🪙.",
                     "🎁 Адміністрація нарахувала вам +{n} 🪙.{note}\nВільно: {f} 🪙.",
                     "🎁 The admins added +{n} 🪙 to your account.{note}\nAvailable: {f} 🪙."),
@@ -209,6 +211,16 @@ T = {
                     "🪙 The admins removed {n} 🪙 from your account.{note}\nAvailable: {f} 🪙."),
     "n_note": ("\nПричина: {r}", "\nПричина: {r}", "\nReason: {r}"),
     "n_start": ("🎁 Стартовый бонус: +{n} 🪙.", "🎁 Стартовий бонус: +{n} 🪙.", "🎁 Welcome bonus: +{n} 🪙."),
+    "my_title": ("📋 <b>Мои анкеты</b>", "📋 <b>Мої анкети</b>", "📋 <b>My listings</b>"),
+    "proof_dup": ("Этот скриншот уже использовали в другой заявке. Сделайте новый скриншот и пришлите его.",
+                  "Цей скриншот уже використовували в іншій заявці. Зробіть новий скриншот і надішліть його.",
+                  "This screenshot was already used in another claim. Take a new screenshot and send it."),
+    "proof_same": ("Скриншоты ДО и ПОСЛЕ одинаковые. Пришлите скриншот ПОСЛЕ выполнения.",
+                   "Скриншоти ДО і ПІСЛЯ однакові. Надішліть скриншот ПІСЛЯ виконання.",
+                   "The BEFORE and AFTER screenshots are the same. Send the AFTER screenshot."),
+    "sup_slow": ("Слишком много сообщений подряд. Подождите несколько минут: администратор уже видит ваш вопрос.",
+                 "Забагато повідомлень поспіль. Зачекайте кілька хвилин: адміністратор уже бачить ваше питання.",
+                 "Too many messages in a row. Wait a few minutes: an admin already sees your question."),
     "n_digest": ("🆕 За сутки в каталоге появилось новых анкет: <b>{n}</b>. За каждое выполненное задание вы получаете монеты 🪙.",
                  "🆕 За добу в каталозі з'явилося нових анкет: <b>{n}</b>. За кожне виконане завдання ви отримуєте монети 🪙.",
                  "🆕 New listings in the catalog in the last day: <b>{n}</b>. You earn coins 🪙 for each completed task."),
@@ -258,17 +270,19 @@ T = {
                   "❓ <b>How coins work</b>\n\n🪙 You earn coins when you complete other people's tasks and the author confirms (or the claim counts automatically).\n💸 You pay those who complete your task. Set the price, 1–{mx} 🪙, in “My listings”.\n🔒 When someone claims your listing, the payment is reserved. If the claim is ruled fake, the coins come back.\n⏸ If your available coins are below the price, the listing pauses and returns to the catalog on its own after a top-up.\n➕ You can create a new listing only with an available coin.\n⚠️ A fake costs −{pen} 🪙.{boost}{invite}{fee}"),
     "how_boost": ("\n🚀 Монеты можно потратить на подъём анкеты в топ: {n} 🪙 за {h} ч.", "\n🚀 Монети можна витратити на підняття анкети в топ: {n} 🪙 за {h} год.",
                   "\n🚀 Spend coins to boost a listing to the top: {n} 🪙 for {h} h."),
-    "how_invite": ("\n🤝 Пригласите друга: +{n} 🪙, когда он выполнит первое задание.", "\n🤝 Запросіть друга: +{n} 🪙, коли він виконає перше завдання.",
-                   "\n🤝 Invite a friend: +{n} 🪙 once they complete their first task."),
+    "how_invite": ("\n🤝 Пригласите друга: +{n} 🪙, когда его задания подтвердят другие авторы, кроме вас (нужно авторов: {k}).",
+                   "\n🤝 Запросіть друга: +{n} 🪙, коли його завдання підтвердять інші автори, крім вас (потрібно авторів: {k}).",
+                   "\n🤝 Invite a friend: +{n} 🪙 once authors other than you confirm their tasks ({k} authors needed)."),
     "how_fee": ("\n🏦 Комиссия бота: {n}% от оплаты, исполнитель всегда получает минимум 1 🪙.",
                 "\n🏦 Комісія бота: {n}% від оплати, виконавець завжди отримує щонайменше 1 🪙.",
                 "\n🏦 Bot fee: {n}% of the payment; the executor always gets at least 1 🪙."),
     "tx_none": ("Пока операций нет.", "Поки операцій немає.", "No activity yet."),
-    "invite_text": ("🤝 <b>Пригласите друга</b>\n\n{bonus}Отправьте другу ссылку:\n<code>{link}</code>\n\nПриглашено: {a} · выполнили первое задание: {b}",
-                    "🤝 <b>Запросіть друга</b>\n\n{bonus}Надішліть другу посилання:\n<code>{link}</code>\n\nЗапрошено: {a} · виконали перше завдання: {b}",
-                    "🤝 <b>Invite a friend</b>\n\n{bonus}Send your friend this link:\n<code>{link}</code>\n\nInvited: {a} · completed a first task: {b}"),
-    "invite_bonus": ("Когда друг выполнит первое задание, вы получите +{n} 🪙.\n\n", "Коли друг виконає перше завдання, ви отримаєте +{n} 🪙.\n\n",
-                     "When your friend completes their first task, you get +{n} 🪙.\n\n"),
+    "invite_text": ("🤝 <b>Пригласите друга</b>\n\n{bonus}Отправьте другу ссылку:\n<code>{link}</code>\n\nПриглашено: {a} · бонус получен: {b}",
+                    "🤝 <b>Запросіть друга</b>\n\n{bonus}Надішліть другу посилання:\n<code>{link}</code>\n\nЗапрошено: {a} · бонус отримано: {b}",
+                    "🤝 <b>Invite a friend</b>\n\n{bonus}Send your friend this link:\n<code>{link}</code>\n\nInvited: {a} · bonus earned: {b}"),
+    "invite_bonus": ("Вы получите +{n} 🪙, когда задания друга подтвердят разные авторы, кроме вас (нужно авторов: {k}).\n\n",
+                     "Ви отримаєте +{n} 🪙, коли завдання друга підтвердять різні автори, крім вас (потрібно авторів: {k}).\n\n",
+                     "You get +{n} 🪙 when different authors, other than you, confirm your friend's tasks ({k} authors needed).\n\n"),
     "notif_head": ("🔔 <b>Уведомления</b>\n\nВыберите, что присылать. Заявки на ваши анкеты, напоминания о дедлайне, споры и сообщения администрации приходят всегда, иначе можно пропустить автозачёт.",
                    "🔔 <b>Сповіщення</b>\n\nОберіть, що надсилати. Заявки на ваші анкети, нагадування про дедлайн, спори й повідомлення адміністрації приходять завжди, інакше можна пропустити автозарахування.",
                    "🔔 <b>Notifications</b>\n\nChoose what to receive. Claims on your listings, deadline reminders, disputes and messages from the admins always arrive, or you could miss the automatic count."),
@@ -328,10 +342,10 @@ DEFAULTS = {"ttl_days": "30", "report_threshold": "3", "sub_required": "0", "sub
             "claim_hours": "12", "open_claims_max": "3", "pair_cooldown_days": "7",
             "penalty_per_strike": "3", "disputes_per_10": "5",
             "price_max": "3", "start_coins": "0", "fee_pct": "0", "boost_price": "3", "boost_hours": "24",
-            "invite_bonus": "1", "new_days": "3", "new_daily_claims": "5"}
+            "invite_bonus": "1", "invite_tasks": "3", "new_days": "3", "new_daily_claims": "5"}
 NUM_KEYS = ("ttl_days", "report_threshold", "claim_hours", "open_claims_max", "pair_cooldown_days",
             "penalty_per_strike", "disputes_per_10", "price_max", "start_coins", "fee_pct", "boost_price",
-            "boost_hours", "invite_bonus", "new_days", "new_daily_claims")
+            "boost_hours", "invite_bonus", "invite_tasks", "new_days", "new_daily_claims")
 _set_cache, _set_ts = {}, 0.0
 
 
@@ -384,12 +398,14 @@ class PgStorage(BaseStorage):
 
     def __init__(self):
         self._cache = {}
+        self._used = {}  # key -> monotonic time of the last access, for pruning
 
     @staticmethod
     def _k(key):
         return f"{key.bot_id}:{key.chat_id}:{key.user_id}:{key.thread_id or ''}:{key.destiny}"
 
     async def _row(self, k):
+        self._used[k] = time.monotonic()
         if k not in self._cache:
             r = await db.fetchrow("select state, data::text data from fsm where k=$1", k)
             self._cache[k] = {"state": r["state"] if r else None, "data": json.loads(r["data"]) if r else {}}
@@ -418,13 +434,25 @@ class PgStorage(BaseStorage):
         if row["state"] is None and not row["data"]:
             await db.execute("delete from fsm where k=$1", k)
             self._cache.pop(k, None)
+            self._used.pop(k, None)
             return
         await db.execute("""insert into fsm(k, state, data, updated) values($1,$2,$3::jsonb,now())
             on conflict(k) do update set state=excluded.state, data=excluded.data, updated=now()""",
                          k, row["state"], json.dumps(row["data"], ensure_ascii=False))
 
+    def prune(self, idle=3600):
+        """Drops entries nobody touched for an hour. Safe: every write already went to Postgres."""
+        edge = time.monotonic() - idle
+        for k in [k for k, ts in self._used.items() if ts < edge]:
+            self._cache.pop(k, None)
+            self._used.pop(k, None)
+
     async def close(self):
         self._cache.clear()
+        self._used.clear()
+
+
+storage = PgStorage()
 
 
 # ---------- DB: numbered migrations ----------
@@ -514,7 +542,19 @@ update users u set locked = coalesce(free_coins(u.id) < (select min(price) from 
   where l.owner = u.id and l.status = 'active'), false);
 """
 
-MIGRATIONS = [M1_BASE, M2_COINS]
+# Duplicate-screenshot check and broadcasts that survive a restart.
+M3_SAFETY = """
+alter table claims add column if not exists proof_uid text;
+alter table claims add column if not exists proof_before_uid text;
+create index if not exists claims_proof_uid on claims(proof_uid) where proof_uid is not null;
+create index if not exists claims_proof_before_uid on claims(proof_before_uid) where proof_before_uid is not null;
+create table if not exists broadcasts(id bigserial primary key, admin_id bigint not null, text text not null,
+  last_uid bigint not null default 0, ok int not null default 0, total int not null default 0,
+  status text not null default 'running', runner text, heartbeat timestamptz,
+  created timestamptz not null default now(), finished timestamptz);
+"""
+
+MIGRATIONS = [M1_BASE, M2_COINS, M3_SAFETY]
 
 
 async def migrate():
@@ -536,10 +576,13 @@ VISIBLE = "l.status='active' and not u.banned and free_coins(l.owner) >= l.price
 
 
 async def ban_user(uid):
-    """Bans, removes listings and cancels the user's open claims (their reserves go back to the authors)."""
+    """Bans, removes listings and cancels open claims on both sides (reserves go back to the authors).
+    Listings are marked deleted instead of being erased, so other users' task history and the coin journal stay intact."""
     await db.execute("insert into users(id, banned) values($1, true) on conflict(id) do update set banned=true", uid)
     await db.execute("update claims set status='rejected', decided=now() where giver=$1 and status in ('pending','disputed')", uid)
-    await db.execute("delete from listings where owner=$1", uid)
+    await db.execute("update claims set status='expired', decided=now() where receiver=$1 and status in ('pending','disputed')", uid)
+    await db.execute("update listings set status='deleted' where owner=$1", uid)
+    await purge_deleted()
     _seen.pop(uid, None)
 
 
@@ -575,6 +618,16 @@ async def add_coins(con, uid, delta, kind, claim_id=None, admin_id=None, note=No
     await con.execute("update users set coins = coins + $2 where id=$1", uid, delta)
     await con.execute("insert into coin_tx(uid, delta, kind, claim_id, admin_id, note) values($1,$2,$3,$4,$5,$6)",
                       uid, delta, kind, claim_id, admin_id, note)
+
+
+async def invite_due(con, uid, need):
+    """Returns the inviter once the friend's tasks were confirmed by `need` different authors.
+    The inviter and other people the inviter brought in do not count, so a ring of own accounts can't mint coins."""
+    return await con.fetchval("""select u.invited_by from users u join users i on i.id=u.invited_by and not i.banned
+        where u.id=$1 and not u.invite_paid and (
+          select count(distinct c.receiver) from claims c join users r on r.id=c.receiver
+          where c.giver=u.id and c.status='confirmed' and c.receiver<>u.invited_by
+            and r.invited_by is distinct from u.invited_by) >= $2""", uid, need)
 
 
 def calc_reward(price, fee_pct):
@@ -700,7 +753,7 @@ async def owner_state(uid, bot):
 async def apply_confirmed(bot, cid, auto=False, forced=False):
     """Pays for a task: the author's reserved coins go to the executor (minus the bot fee).
     Guarded by status, so a double tap or a race cannot pay twice. forced = decided by an admin in a dispute."""
-    fee, bonus = await num("fee_pct"), await num("invite_bonus")
+    fee, bonus, need = await num("fee_pct"), await num("invite_bonus"), max(1, await num("invite_tasks"))
     inviter = None
     async with db.acquire() as con:
         async with con.transaction():
@@ -716,9 +769,10 @@ async def apply_confirmed(bot, cid, auto=False, forced=False):
             await add_coins(con, g, reward, "earn", cid)
             await con.execute("update users set rating=rating+1 where id=$1", g)
             if bonus > 0:
-                inviter = await con.fetchval("""update users set invite_paid=true where id=$1 and invited_by is not null
-                    and not invite_paid returning invited_by""", g)
-                if inviter and await con.fetchval("select not banned from users where id=$1", inviter):
+                inviter = await invite_due(con, g, need)
+                # the guarded update makes sure the bonus is paid once, even if two confirmations race
+                if inviter and await con.fetchval(
+                        "update users set invite_paid=true where id=$1 and not invite_paid returning id", g):
                     await add_coins(con, inviter, bonus, "invite", cid)
                 else:
                     inviter = None
@@ -808,7 +862,9 @@ async def claims_expiry(bot):
                     where c.status='pending' and not c.reminded and c.created < now() - make_interval(hours => $1)""", hours - 2):
                 await db.execute("update claims set reminded=true where id=$1", x["id"])
                 await notify(bot, x["receiver"], "remind", t=esc(x["title"]), p=x["price"])
-        for x in await db.fetch("select id from claims where status='pending' and created < now() - make_interval(hours => $1)", hours):
+        for x in await db.fetch("""select c.id from claims c where c.status='pending' and c.created < now() - make_interval(hours => $1)
+                and not exists (select 1 from fsm f where f.state=$2 and f.data->>'cid' = c.id::text
+                                and f.updated > now() - interval '30 minutes')""", hours, Reason.text.state):
             await apply_confirmed(bot, x["id"], auto=True)
         for x in await db.fetch("""update claims c set status='expired', decided=now()
                 where status='disputed' and disputed_at < now() - interval '7 days'
@@ -868,7 +924,7 @@ def menu_kb(lang, is_admin=False):
 
 # ---------- ILLUSTRATIONS ----------
 ROOT_DIR = Path(__file__).parent
-IMG_DIRS = [ROOT_DIR]  # all images sit next to main.py
+IMG_DIRS = [ROOT_DIR / "img", ROOT_DIR]  # img/ first; images next to main.py keep working
 _file_ids = {}
 
 
@@ -943,6 +999,7 @@ class Mw(BaseMiddleware):
         if u is None:
             return await handler(event, data)
         now = time.monotonic()
+        start_bonus = 0
         c = _seen.get(u.id)
         if c is None or now - c[2] > SEEN_TTL or c[3] != u.username:
             guess = (u.language_code or "")[:2]
@@ -963,19 +1020,38 @@ class Mw(BaseMiddleware):
                     async with db.acquire() as con:
                         async with con.transaction():
                             await add_coins(con, u.id, start, "start")
+                    # with a known language, tell about the bonus right after the welcome screen;
+                    # otherwise lang_set does it once the language is chosen
+                    start_bonus = start if row["lang"] else 0
             c = (row["lang"], row["banned"], now, u.username)
             _seen[u.id] = c
-        if c[1]:
-            return
         is_cb = isinstance(event, CallbackQuery)
+        if c[1]:
+            if is_cb:  # answer silently, so the button does not keep spinning
+                try:
+                    await event.answer()
+                except Exception:
+                    pass
+            return
         msg = event.message if is_cb else event
-        if c[0] is None and not (is_cb and event.data.startswith("sl:")):
+        if c[0] is None and not (is_cb and (event.data or "").startswith("sl:")):
             await send_screen(data["bot"], msg.chat.id, "lang", t("ru", "choose"), lang_kb())
             if is_cb:
                 await event.answer()
             return
         data["lang"] = c[0] or "ru"
-        return await handler(event, data)
+        result = await handler(event, data)
+        if start_bonus:
+            await notify(data["bot"], u.id, "n_start", n=start_bonus)
+        return result
+
+
+def prune_caches():
+    """Hourly: forget users idle for an hour. Their next update simply reloads them from the database."""
+    edge = time.monotonic() - 3600
+    for uid in [uid for uid, c in _seen.items() if c[2] < edge]:
+        _seen.pop(uid, None)
+    storage.prune()
 
 
 def seen_set(uid, lang=None, banned=None):
@@ -1059,11 +1135,16 @@ async def lang_choose(c: CallbackQuery):
 
 @r.callback_query(F.data.startswith("sl:"))
 async def lang_set(c: CallbackQuery):
-    lang = c.data[3:]
+    lang, uid = c.data[3:], c.from_user.id
     if lang in LANGS:
-        await db.execute("update users set lang=$2 where id=$1", c.from_user.id, lang)
-        seen_set(c.from_user.id, lang=lang)
+        first = await db.fetchval("select lang is null from users where id=$1", uid)
+        await db.execute("update users set lang=$2 where id=$1", uid, lang)
+        seen_set(uid, lang=lang)
         await send_menu(c, lang)
+        if first:
+            bonus = await db.fetchval("select delta from coin_tx where uid=$1 and kind='start' order by id limit 1", uid)
+            if bonus:
+                await notify(c.bot, uid, "n_start", n=bonus)
     await c.answer()
 
 
@@ -1172,6 +1253,11 @@ async def show_page(c, lang, cat_, p):
         f"""select l.*, u.username, u.rating, coalesce(l.boosted_until > now(), false) boosted
             from listings l join users u on u.id=l.owner where {cond}
             order by boosted desc, l.price desc, l.updated desc, l.id offset {p} limit 1""", *args)
+    if not x:  # the listing disappeared between the two queries
+        if p:
+            return await show_page(c, lang, cat_, 0)
+        await screen(c, "empty", t(lang, "empty"), home_kb())
+        return await c.answer()
     await log_event(c.from_user.id, "view")
     s = await owner_stats(x["owner"])
     pct = t(lang, "pct_fmt", p=s["pct"], n=s["total"]) if s["total"] else t(lang, "pct_none")
@@ -1233,10 +1319,18 @@ async def skip_listing(c: CallbackQuery, lang):
 @r.callback_query(F.data.startswith("rp:"))
 async def report(c: CallbackQuery, lang):
     lid = int(c.data[3:])
-    await db.execute("insert into reports(listing_id,reporter) select id, $2 from listings where id=$1 on conflict do nothing",
-                     lid, c.from_user.id)
+    owner = await db.fetchval("select owner from listings where id=$1 and status<>'deleted'", lid)
+    if owner is None:
+        return await c.answer(t(lang, "claim_gone"), show_alert=True)
+    if owner == c.from_user.id:
+        return await c.answer(t(lang, "yours"), show_alert=True)
+    await db.execute("insert into reports(listing_id,reporter) values($1,$2) on conflict do nothing", lid, c.from_user.id)
     await log_event(c.from_user.id, "report")
-    cnt = await db.fetchval("select count(*) from reports where listing_id=$1", lid)
+    # Only trusted reporters hide a listing: older than "new_days" or with at least one confirmed task.
+    # Reports from fresh accounts are still stored and visible to admins.
+    cnt = await db.fetchval("""select count(*) from reports rp join users u on u.id=rp.reporter
+        where rp.listing_id=$1 and not u.banned and (u.rating > 0 or u.created < now() - make_interval(days => $2))""",
+                            lid, await num("new_days"))
     if cnt >= await num("report_threshold"):
         hid = await db.fetchval("update listings set status='hidden' where id=$1 and status='active' returning id", lid)
         if hid:
@@ -1248,8 +1342,8 @@ async def report(c: CallbackQuery, lang):
     await c.answer(t(lang, "thanks"), show_alert=True)
 
 
-# --- my listings: renew, delete, price, screenshots, boost ---
-async def listing_view(x, lang, free):
+# --- my listings: one screen with paging; renew, delete, price, screenshots, boost ---
+async def listing_view(x, lang, free, p=0, n=1):
     st = []
     if x["status"] == "hidden":
         st.append(t(lang, "hidden"))
@@ -1258,46 +1352,74 @@ async def listing_view(x, lang, free):
     if x["boosted_until"] and x["boosted_until"] > datetime.now(timezone.utc):
         st.append(t(lang, "boosted_tag", d=f"{x['boosted_until']:%d.%m %H:%M} UTC"))
     status = ("\n" + " · ".join(st)) if st else ""
-    text = (f"{t(lang, 'c_' + x['category'])}{status}\n<b>{esc(x['title'])}</b>\n{esc(x['descr'])}\n"
-            f"🔗 <a href='{esc(x['link'])}'>{esc(x['link'])}</a>")
-    rows = [[B(text=t(lang, "renew"), callback_data=f"lr:{x['id']}"), B(text=t(lang, "delete"), callback_data=f"ld:{x['id']}")],
+    shown = x["link"] if len(x["link"]) <= 60 else x["link"][:59] + "…"
+    descr = f"{esc(x['descr'])}\n" if x["descr"] else ""
+    text = (f"{t(lang, 'my_title')} · {p + 1}/{n}\n\n"
+            f"{t(lang, 'c_' + x['category'])}{status}\n<b>{esc(x['title'])}</b>\n{descr}"
+            f"🔗 <a href='{esc(x['link'])}'>{esc(shown)}</a>")
+    rows = [[B(text=t(lang, "renew"), callback_data=f"lr:{x['id']}:m"), B(text=t(lang, "delete"), callback_data=f"ld:{x['id']}")],
             [B(text=t(lang, "open_link"), url=x["link"])],
             [B(text=t(lang, "b_price", n=x["price"]), callback_data=f"lp:{x['id']}"),
              B(text=t(lang, "b_pm", n=x["proof_mode"]), callback_data=f"pm:{x['id']}")]]
     bp = await num("boost_price")
     if bp > 0:
         rows.append([B(text=t(lang, "b_boost", n=bp), callback_data=f"lb:{x['id']}")])
+    if n > 1:
+        nav = []
+        if p > 0:
+            nav.append(B(text="◀️", callback_data=f"my:{p - 1}"))
+        nav.append(B(text=f"{p + 1}/{n}", callback_data="noop"))
+        if p < n - 1:
+            nav.append(B(text="▶️", callback_data=f"my:{p + 1}"))
+        rows.append(nav)
+    rows.append([B(text=t(lang, "b_new"), callback_data="new"), B(text="🏠", callback_data="menu")])
     return text, KB(inline_keyboard=rows)
 
 
+async def my_rows(uid):
+    return await db.fetch("select * from listings where owner=$1 and status<>'deleted' order by id desc", uid)
+
+
+async def show_my(c, lang, p=0, lid=None):
+    """Shows one of the user's listings in the current message. lid keeps the same listing on screen after a change."""
+    uid = c.from_user.id
+    rows = await my_rows(uid)
+    if not rows:
+        kb = KB(inline_keyboard=[[B(text=t(lang, "b_new"), callback_data="new"), B(text="🏠", callback_data="menu")]])
+        return await screen(c, "empty", t(lang, "empty"), kb)
+    if lid is not None:
+        p = next((i for i, x in enumerate(rows) if x["id"] == lid), p)
+    p = max(0, min(p, len(rows) - 1))
+    text, kb = await listing_view(rows[p], lang, await free_coins(uid), p, len(rows))
+    await screen(c, "my", text, kb)
+
+
 async def refresh_listing_msg(c, lid, lang):
-    x = await db.fetchrow("select * from listings where id=$1 and owner=$2 and status<>'deleted'", lid, c.from_user.id)
-    if not x:
-        return
-    text, kb = await listing_view(x, lang, await free_coins(c.from_user.id))
-    try:
-        await c.message.edit_text(text, reply_markup=kb)
-    except TelegramBadRequest:
-        pass
+    await show_my(c, lang, lid=lid)
 
 
 @r.callback_query(F.data == "my")
 async def my(c: CallbackQuery, lang):
-    rows = await db.fetch("select * from listings where owner=$1 and status<>'deleted' order by id desc limit 10", c.from_user.id)
-    if not rows:
-        await screen(c, "empty", t(lang, "empty"), home_kb())
-    free = await free_coins(c.from_user.id)
-    for x in rows:
-        text, kb = await listing_view(x, lang, free)
-        await c.message.answer(text, reply_markup=kb)
+    await show_my(c, lang)
+    await c.answer()
+
+
+@r.callback_query(F.data.regexp(r"^my:\d+$"))
+async def my_page(c: CallbackQuery, lang):
+    await show_my(c, lang, int(c.data[3:]))
     await c.answer()
 
 
 @r.callback_query(F.data.startswith("lr:"))
 async def renew(c: CallbackQuery, lang):
+    """lr:ID comes from the expiry reminder (left as it is), lr:ID:m from the "My listings" screen (refreshed)."""
+    parts = c.data.split(":")
+    lid = int(parts[1])
     await db.execute("update listings set updated=now(), warned=false where id=$1 and owner=$2 and status<>'deleted'",
-                     int(c.data[3:]), c.from_user.id)
+                     lid, c.from_user.id)
     await c.answer(t(lang, "done"), show_alert=True)
+    if len(parts) > 2:
+        await show_my(c, lang, lid=lid)
 
 
 async def purge_deleted():
@@ -1309,14 +1431,13 @@ async def purge_deleted():
 
 @r.callback_query(F.data.startswith("ld:"))
 async def delete(c: CallbackQuery, lang):
-    await db.execute("update listings set status='deleted' where id=$1 and owner=$2", int(c.data[3:]), c.from_user.id)
+    lid, uid = int(c.data[3:]), c.from_user.id
+    ids = [x["id"] for x in await my_rows(uid)]
+    await db.execute("update listings set status='deleted' where id=$1 and owner=$2", lid, uid)
     await purge_deleted()
-    await refresh_owner(c.from_user.id)
-    try:
-        await c.message.delete()
-    except Exception:
-        pass
+    await refresh_owner(uid)
     await c.answer(t(lang, "done"))
+    await show_my(c, lang, ids.index(lid) if lid in ids else 0)
 
 
 @r.callback_query(F.data.startswith("lp:"))
@@ -1485,7 +1606,7 @@ async def coins_how(c: CallbackQuery, lang):
     bp, bh, inv, fee = await num("boost_price"), await num("boost_hours"), await num("invite_bonus"), await num("fee_pct")
     text = t(lang, "coins_how", mx=max(1, await num("price_max")), pen=await setting("penalty_per_strike"),
              boost=t(lang, "how_boost", n=bp, h=bh) if bp > 0 else "",
-             invite=t(lang, "how_invite", n=inv) if inv > 0 else "",
+             invite=t(lang, "how_invite", n=inv, k=max(1, await num("invite_tasks"))) if inv > 0 else "",
              fee=t(lang, "how_fee", n=fee) if fee > 0 else "")
     await screen(c, "coins", text, sub_kb(lang, back="coins"))
     await c.answer()
@@ -1498,7 +1619,7 @@ async def invite_view(c: CallbackQuery, lang):
     r_ = await db.fetchrow("select count(*) a, count(*) filter (where invite_paid) b from users where invited_by=$1", uid)
     bonus = await num("invite_bonus")
     text = t(lang, "invite_text", link=f"https://t.me/{me.username}?start=ref_{uid}", a=r_["a"], b=r_["b"],
-             bonus=t(lang, "invite_bonus", n=bonus) if bonus > 0 else "")
+             bonus=t(lang, "invite_bonus", n=bonus, k=max(1, await num("invite_tasks"))) if bonus > 0 else "")
     await screen(c, "invite", text, sub_kb(lang, back="coins"))
     await c.answer()
 
@@ -1537,7 +1658,13 @@ async def forward_proof(bot, to_uid, from_uid, mid, fid):
         await bot.send_photo(to_uid, fid)
 
 
-async def claim_create(m: Message, lang, lid, proof, mid, before=None, mid_before=None):
+async def proof_used(file_uid):
+    """True when this exact picture was already sent as proof in any claim (Telegram keeps file_unique_id per file)."""
+    return await db.fetchval("""select exists(select 1 from claims where proof_uid=$1)
+        or exists(select 1 from claims where proof_before_uid=$1)""", file_uid)
+
+
+async def claim_create(m: Message, lang, lid, proof, mid, before=None, mid_before=None, proof_uid=None, before_uid=None):
     x = await db.fetchrow("select id, owner, price from listings where id=$1 and status='active'", lid)
     if not x:
         return await m.answer(t(lang, "claim_gone"), reply_markup=home_kb())
@@ -1552,9 +1679,10 @@ async def claim_create(m: Message, lang, lid, proof, mid, before=None, mid_befor
                 if await free_coins(x["owner"], con) < x["price"]:
                     raise _NoCoins()
                 cid = await con.fetchval(
-                    """insert into claims(listing_id, giver, receiver, proof, mid, proof_before, mid_before, price)
-                       values($1,$2,$3,$4,$5,$6,$7,$8) returning id""",
-                    lid, m.from_user.id, x["owner"], proof, mid, before, mid_before, x["price"])
+                    """insert into claims(listing_id, giver, receiver, proof, mid, proof_before, mid_before, price,
+                                          proof_uid, proof_before_uid)
+                       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id""",
+                    lid, m.from_user.id, x["owner"], proof, mid, before, mid_before, x["price"], proof_uid, before_uid)
     except asyncpg.UniqueViolationError:
         return await m.answer(t(lang, "claim_pair"), reply_markup=home_kb())
     except _NoCoins:
@@ -1589,7 +1717,10 @@ async def claim_start(c: CallbackQuery, lang, state: FSMContext):
 
 @r.message(Claim.before, F.photo)
 async def claim_before(m: Message, lang, state: FSMContext):
-    await state.update_data(before=m.photo[-1].file_id, mid_before=m.message_id)
+    puid = m.photo[-1].file_unique_id
+    if await proof_used(puid):
+        return await m.answer(t(lang, "proof_dup"), reply_markup=cancel_kb(lang))
+    await state.update_data(before=m.photo[-1].file_id, before_uid=puid, mid_before=m.message_id)
     await state.set_state(Claim.after)
     await m.answer(t(lang, "claim_after_ask"), reply_markup=cancel_kb(lang))
 
@@ -1597,19 +1728,30 @@ async def claim_before(m: Message, lang, state: FSMContext):
 @r.message(Claim.after, F.photo)
 async def claim_after(m: Message, lang, state: FSMContext):
     d = await state.get_data()
-    await state.clear()
     if "lid" not in d:
+        await state.clear()
         return await send_menu(m, lang)
-    await claim_create(m, lang, d["lid"], m.photo[-1].file_id, m.message_id, d.get("before"), d.get("mid_before"))
+    puid = m.photo[-1].file_unique_id
+    if puid == d.get("before_uid"):
+        return await m.answer(t(lang, "proof_same"), reply_markup=cancel_kb(lang))
+    if await proof_used(puid):
+        return await m.answer(t(lang, "proof_dup"), reply_markup=cancel_kb(lang))
+    await state.clear()
+    await claim_create(m, lang, d["lid"], m.photo[-1].file_id, m.message_id, d.get("before"), d.get("mid_before"),
+                       puid, d.get("before_uid"))
 
 
 @r.message(Claim.proof, F.photo)
 async def claim_proof(m: Message, lang, state: FSMContext):
     d = await state.get_data()
-    await state.clear()
     if "lid" not in d:
+        await state.clear()
         return await send_menu(m, lang)
-    await claim_create(m, lang, d["lid"], m.photo[-1].file_id, m.message_id)
+    puid = m.photo[-1].file_unique_id
+    if await proof_used(puid):
+        return await m.answer(t(lang, "proof_dup"), reply_markup=cancel_kb(lang))
+    await state.clear()
+    await claim_create(m, lang, d["lid"], m.photo[-1].file_id, m.message_id, proof_uid=puid)
 
 
 @r.message(StateFilter(Claim.before, Claim.after, Claim.proof))
@@ -1626,22 +1768,23 @@ async def claim_answer(c: CallbackQuery, lang, state: FSMContext):
     if c.data.startswith("cf:"):
         await apply_confirmed(c.bot, cid)
         await c.answer(t(lang, "done"))
-    else:
-        lim = await num("disputes_per_10")
-        if lim:
-            used = await db.fetchval("""select count(*) filter (where disputed_at is not null) from
-                (select disputed_at from claims where receiver=$1 and status <> 'pending' order by id desc limit 10) s""",
-                                     c.from_user.id)
-            if used >= lim:
-                return await c.answer(t(lang, "dispute_limit", n=used), show_alert=True)
-        await state.set_state(Reason.text)
-        await state.update_data(cid=cid)
-        await c.message.answer(t(lang, "reason_ask"), reply_markup=cancel_kb(lang))
-        await c.answer()
-    try:
-        await c.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+        try:
+            await c.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
+    lim = await num("disputes_per_10")
+    if lim:
+        used = await db.fetchval("""select count(*) filter (where disputed_at is not null) from
+            (select disputed_at from claims where receiver=$1 and status <> 'pending' order by id desc limit 10) s""",
+                                 c.from_user.id)
+        if used >= lim:
+            return await c.answer(t(lang, "dispute_limit", n=used), show_alert=True)
+    # The buttons stay on the claim until the reason is sent: if the author cancels, they can still decide.
+    await state.set_state(Reason.text)
+    await state.update_data(cid=cid, amid=c.message.message_id)
+    await c.message.answer(t(lang, "reason_ask"), reply_markup=cancel_kb(lang))
+    await c.answer()
 
 
 @r.message(Reason.text, F.text)
@@ -1649,10 +1792,16 @@ async def reason_text(m: Message, lang, state: FSMContext):
     reason = m.text.strip()[:300]
     if len(reason) < 3:
         return await m.answer(t(lang, "reason_ask"), reply_markup=cancel_kb(lang))
-    cid = (await state.get_data()).get("cid")
+    d = await state.get_data()
+    cid, amid = d.get("cid"), d.get("amid")
     await state.clear()
     row = await db.fetchrow("""update claims set status='disputed', disputed_at=now(), reason=$2
         where id=$1 and status='pending' and receiver=$3 returning giver""", cid, reason, m.from_user.id)
+    if amid:  # the claim is decided either way now: remove its buttons
+        try:
+            await m.bot.edit_message_reply_markup(chat_id=m.chat.id, message_id=amid, reply_markup=None)
+        except Exception:
+            pass
     if not row:
         return await m.answer(t(lang, "claim_done"), reply_markup=home_kb())
     try:
@@ -1683,6 +1832,10 @@ async def support_start(c: CallbackQuery, lang, state: FSMContext):
 
 @r.message(Support.write)
 async def support_msg(m: Message, lang, state: FSMContext):
+    recent = await db.fetchval("""select count(*) from chat_msgs where uid=$1 and not from_admin
+        and created > now() - make_interval(mins => $2)""", m.from_user.id, SUP_WINDOW_MIN)
+    if recent >= SUP_LIMIT:
+        return await m.answer(t(lang, "sup_slow"), reply_markup=support_kb(lang))
     await chat_log(m.from_user.id, False, m.text or m.caption or "[медіа]")
     for a in ADMIN_IDS:
         try:
@@ -1721,7 +1874,8 @@ SET_NAMES = {"ttl_days": "Термін життя анкети (дні)", "repor
              "fee_pct": "Комісія бота, % від оплати (0 = без комісії)",
              "penalty_per_strike": "Штраф за фейк (монет)",
              "start_coins": "Стартові монети новим користувачам",
-             "invite_bonus": "Бонус за друга, що виконав 1-ше завдання (монет)",
+             "invite_bonus": "Бонус за запрошеного друга (монет)",
+             "invite_tasks": "Скільки різних авторів мають підтвердити завдання друга, щоб дати бонус",
              "boost_price": "Ціна підняття анкети в топ (0 = вимкнено)",
              "boost_hours": "Скільки годин анкета в топі",
              "open_claims_max": "Макс. відкритих заявок у виконавця (0 = без ліміту)",
@@ -2038,19 +2192,66 @@ async def bc_preview(m, state: FSMContext):
                                                     [B(text="❌ Скасувати", callback_data="adm")]]))
 
 
-async def broadcast(bot, text, report_to):
-    ids = [x["id"] for x in await db.fetch("select id from users where not banned and not ('news' = any(notif_off))")]
-    ok = 0
-    for uid in ids:
+BC_RECIPIENTS = "not banned and not ('news' = any(notif_off))"
+
+
+async def send_bc(bot, bid, uid, text):
+    """One broadcast message. Waits out Telegram's flood limit (RetryAfter) instead of skipping the user."""
+    for _ in range(3):
         try:
             await bot.send_message(uid, text)
-            ok += 1
+            return True
+        except TelegramRetryAfter as e:
+            await db.execute("update broadcasts set heartbeat=now() where id=$1 and runner=$2", bid, INSTANCE)
+            await asyncio.sleep(e.retry_after + 1)
         except TelegramForbiddenError:
-            pass
+            return False
         except Exception as e:
             log.warning("broadcast to %s failed: %s", uid, e)
-        await asyncio.sleep(0.05)
-    await bot.send_message(report_to, f"📣 Розсилку завершено: {ok} з {len(ids)}", reply_markup=admin_kb())
+            return False
+    return False
+
+
+async def broadcast(bot, bid):
+    """Sends a stored broadcast in user-id order and saves progress every 20 users.
+    After a Render restart the new instance picks it up from the saved point (see resume_broadcasts)."""
+    b = await db.fetchrow("select * from broadcasts where id=$1 and status='running' and runner=$2", bid, INSTANCE)
+    if not b:
+        return
+    last, ok, sent = b["last_uid"], b["ok"], 0
+    while True:
+        ids = [x["id"] for x in await db.fetch(
+            f"select id from users where id > $1 and {BC_RECIPIENTS} order by id limit 200", last)]
+        if not ids:
+            break
+        for uid in ids:
+            if await send_bc(bot, bid, uid, b["text"]):
+                ok += 1
+            last, sent = uid, sent + 1
+            if sent % 20 == 0 and not await db.fetchval(
+                    """update broadcasts set last_uid=$2, ok=$3, heartbeat=now() where id=$1 and runner=$4
+                       and status='running' returning id""", bid, last, ok, INSTANCE):
+                return  # another instance took over or an admin stopped it
+            await asyncio.sleep(0.05)
+    await db.execute("update broadcasts set status='done', finished=now(), last_uid=$2, ok=$3 where id=$1",
+                     bid, last, ok)
+    try:
+        await bot.send_message(b["admin_id"], f"📣 Розсилку #{bid} завершено: {ok} з {b['total']}", reply_markup=admin_kb())
+    except Exception as e:
+        log.warning("broadcast report failed: %s", e)
+
+
+async def resume_broadcasts(bot):
+    """Runs once after start. Waits until the old instance (during a deploy) has surely stopped, then takes over
+    broadcasts whose heartbeat went quiet."""
+    await asyncio.sleep(150)
+    try:
+        for x in await db.fetch("""update broadcasts set runner=$1, heartbeat=now() where status='running'
+                and (heartbeat is null or heartbeat < now() - interval '120 seconds') returning id""", INSTANCE):
+            log.info("resuming broadcast %s", x["id"])
+            _bg(broadcast(bot, x["id"]))
+    except Exception:
+        log.exception("could not resume broadcasts")
 
 
 @ar.callback_query(F.data == "bc:go")
@@ -2059,8 +2260,13 @@ async def bc_go(c: CallbackQuery, state: FSMContext):
     await state.clear()
     if not text:
         return await c.answer("Немає тексту")
+    if await db.fetchval("select exists(select 1 from broadcasts where status='running')"):
+        return await c.answer("Попередня розсилка ще триває. Дочекайтеся звіту.", show_alert=True)
+    total = await db.fetchval(f"select count(*) from users where {BC_RECIPIENTS}")
+    bid = await db.fetchval("""insert into broadcasts(admin_id, text, total, runner, heartbeat)
+        values($1,$2,$3,$4,now()) returning id""", c.from_user.id, text, total, INSTANCE)
     await c.answer("Розсилаю...")
-    _bg(broadcast(c.bot, text, c.from_user.id))
+    _bg(broadcast(c.bot, bid))
 
 
 # --- moderation: disputes ---
@@ -2430,8 +2636,22 @@ async def send_digests(bot):
             await asyncio.sleep(0.05)
 
 
+_db_health = {"ok": True, "at": None}  # filled by the hourly loop; /health reads it without touching Neon
+
+
+async def check_db():
+    try:
+        await db.fetchval("select 1")
+        _db_health.update(ok=True, at=datetime.now(timezone.utc))
+    except Exception:
+        _db_health.update(ok=False, at=datetime.now(timezone.utc))
+        log.exception("database check failed")
+
+
 async def cleanup_loop(bot: Bot):
     while True:
+        await check_db()
+        prune_caches()
         try:
             ttl = await num("ttl_days")
             rows = await db.fetch(
@@ -2469,7 +2689,8 @@ async def on_startup(bot: Bot, dispatcher: Dispatcher):
     await bot.set_webhook(f"{BASE_URL}/webhook", secret_token=SECRET, drop_pending_updates=False,
                           allowed_updates=dispatcher.resolve_used_update_types())
     _bg(cleanup_loop(bot))
-    log.info("bot started")
+    _bg(resume_broadcasts(bot))
+    log.info("bot started (instance %s)", INSTANCE)
 
 
 async def on_shutdown(bot: Bot):
@@ -2481,9 +2702,17 @@ async def on_shutdown(bot: Bot):
     log.info("bot stopped")
 
 
+async def health(_):
+    # UptimeRobot pings this every few minutes. It does not query Neon (so Neon can sleep and save compute hours);
+    # it reports the result of the hourly database check instead.
+    if not _db_health["ok"]:
+        return web.Response(status=503, text=f"database error at {_db_health['at']:%Y-%m-%d %H:%M} UTC")
+    return web.Response(text="ok")
+
+
 def main():
     bot = Bot(TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
-    dp = Dispatcher(storage=PgStorage())
+    dp = Dispatcher(storage=storage)
     dp.message.outer_middleware(Mw())
     dp.callback_query.outer_middleware(Mw())
     dp.include_router(ar)
@@ -2491,10 +2720,6 @@ def main():
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     app = web.Application()
-
-    async def health(_):
-        return web.Response(text="ok")
-
     app.router.add_get("/health", health)
     SimpleRequestHandler(dp, bot, secret_token=SECRET).register(app, path="/webhook")
     setup_application(app, dp, bot=bot)
